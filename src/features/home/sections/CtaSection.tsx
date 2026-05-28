@@ -1,0 +1,48 @@
+import { Section } from "@/components/layout/Section"
+import { FadeIn } from "@/components/motion/FadeIn"
+import { GlassPanel } from "@/components/surfaces/GlassPanel"
+import { Button } from "@/components/ui/button"
+import { Heading } from "@/components/ui/typography/Heading"
+import { Text } from "@/components/ui/typography/Text"
+
+function CtaSection() {
+  return (
+    <Section aria-labelledby="cta-title" className="pb-[calc(var(--section-space-y)*1.15)]">
+      <FadeIn>
+        <div className="relative overflow-hidden rounded-[var(--radius-xl)]">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-[var(--gradient-primary)] opacity-14"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-[color-mix(in_srgb,var(--background)_72%,transparent)]"
+          />
+
+          <GlassPanel className="relative border-[color-mix(in_srgb,var(--border)_80%,transparent)] bg-transparent px-6 py-12 sm:px-10 sm:py-16">
+            <div className="mx-auto flex max-w-2xl flex-col items-center gap-6 text-center">
+              <Heading id="cta-title" level={2} size="title" className="text-balance">
+                Ready to unlock your next conversion breakthrough?
+              </Heading>
+
+              <Text variant="muted" size="lg" balanced className="mx-auto">
+                Run a focused Convertly audit and get clear opportunities your team can ship this week.
+              </Text>
+
+              <div className="flex w-full flex-col items-center justify-center gap-3 pt-2 sm:w-auto sm:flex-row">
+                <Button className="h-11 w-full px-6 sm:w-auto">
+                  Start Free Audit
+                </Button>
+                <Button variant="outline" className="h-11 w-full px-6 sm:w-auto">
+                  Book a Demo
+                </Button>
+              </div>
+            </div>
+          </GlassPanel>
+        </div>
+      </FadeIn>
+    </Section>
+  )
+}
+
+export { CtaSection }

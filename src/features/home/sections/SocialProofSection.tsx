@@ -1,0 +1,76 @@
+import { Section } from "@/components/layout/Section"
+import { SectionHeader } from "@/components/layout/SectionHeader"
+import { FadeIn } from "@/components/motion/FadeIn"
+import { Card } from "@/components/surfaces/Card"
+import { Text } from "@/components/ui/typography/Text"
+
+const trustIndicators = [
+  "AI-first growth workflows",
+  "Focused conversion analysis",
+  "Built for modern product teams",
+]
+
+const logoPlaceholders = [
+  "Company One",
+  "Company Two",
+  "Company Three",
+  "Company Four",
+  "Company Five",
+  "Company Six",
+]
+
+function SocialProofSection() {
+  return (
+    <Section aria-labelledby="social-proof-title">
+      <div className="space-y-10 sm:space-y-12">
+        <FadeIn>
+          <SectionHeader
+            centered
+            eyebrow="Trust"
+            title="Built for teams that care about conversion quality"
+            description="Convertly supports product, marketing, and growth teams with focused insights they can act on quickly."
+            id="social-proof-title"
+          />
+        </FadeIn>
+
+        <FadeIn delay={0.06}>
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+            {trustIndicators.map((item) => (
+              <Text
+                key={item}
+                size="sm"
+                variant="muted"
+                className="max-w-none tracking-wide"
+              >
+                {item}
+              </Text>
+            ))}
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.1}>
+          <Card className="bg-[color-mix(in_srgb,var(--surface)_58%,transparent)] p-4 sm:p-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {logoPlaceholders.map((logo) => (
+                <div
+                  key={logo}
+                  className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_88%,transparent)] px-3 py-3 text-center"
+                >
+                  <Text
+                    size="sm"
+                    variant="muted"
+                    className="max-w-none tracking-[0.12em] uppercase"
+                  >
+                    {logo}
+                  </Text>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </FadeIn>
+      </div>
+    </Section>
+  )
+}
+
+export { SocialProofSection }
