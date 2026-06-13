@@ -10,7 +10,10 @@ import { FooterSection } from "@/features/home/sections/FooterSection"
 import { HeroSection } from "@/features/home/sections/HeroSection"
 import { HowItWorksSection } from "@/features/home/sections/HowItWorksSection"
 import { SocialProofSection } from "@/features/home/sections/SocialProofSection"
-import { handleMarketingHashOnLoad } from "@/lib/marketingNavigation"
+import {
+  handleMarketingHashOnLoad,
+  isSupabaseAuthCallbackHash,
+} from "@/lib/marketingNavigation"
 import { ROUTES } from "@/lib/routes"
 
 function HomePage() {
@@ -30,7 +33,12 @@ function HomePage() {
     return () => window.clearTimeout(timer)
   }, [deletedNotice])
 
-  if (!isLoading && isAuthenticated && !deletedNotice) {
+  if (
+    !isLoading &&
+    isAuthenticated &&
+    !deletedNotice &&
+    isSupabaseAuthCallbackHash()
+  ) {
     return <Navigate to={ROUTES.dashboard} replace />
   }
 
