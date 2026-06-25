@@ -2,7 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import { useEffect, useState } from "react"
 
 import { AuthLegalPanel } from "@/components/auth/AuthLegalPanel"
-import { useAuthPanel } from "@/components/auth/AuthPanelContext"
+import { useAuthPanel } from "@/hooks/useAuthPanel"
 import { Heading } from "@/components/ui/typography/Heading"
 import { Text } from "@/components/ui/typography/Text"
 import { AuthShowcaseProgress } from "@/features/auth/components/AuthShowcaseProgress"

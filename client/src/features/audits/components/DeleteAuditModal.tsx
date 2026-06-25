@@ -1,5 +1,5 @@
 import { AlertTriangle, Loader2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import { AuthFormMessage } from "@/components/auth/AuthFormMessage"
 import { Modal } from "@/components/feedback/Modal"
@@ -18,16 +18,14 @@ function DeleteAuditModal({ open, audit, onClose, onConfirmDelete }: DeleteAudit
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!open) {
-      setError(null)
-      setIsDeleting(false)
-    }
-  }, [open])
+  function resetState() {
+    setError(null)
+    setIsDeleting(false)
+  }
 
   function handleClose() {
     if (isDeleting) return
-    setError(null)
+    resetState()
     onClose()
   }
 

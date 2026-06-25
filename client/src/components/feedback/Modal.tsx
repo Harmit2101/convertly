@@ -1,6 +1,7 @@
 import { X } from "lucide-react"
 import { useEffect, useId, type ReactNode } from "react"
 
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 import { cn } from "@/lib/utils"
 
 type ModalProps = {
@@ -27,14 +28,7 @@ function Modal({
   const titleId = useId()
   const descriptionId = useId()
 
-  useEffect(() => {
-    if (!open) return
-    const previous = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      document.body.style.overflow = previous
-    }
-  }, [open])
+  useBodyScrollLock(open)
 
   useEffect(() => {
     if (!open) return

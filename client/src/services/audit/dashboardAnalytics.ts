@@ -1,12 +1,23 @@
-import { buildAuditListEntryFromSession, resolveGrowthScore } from "@/services/audit/auditDetailBuilder"
 import {
-  getAuditSessionData,
-  getFindingsByUserId,
-  getSessionsByUserId,
+  buildAuditListEntryFromSummary,
+  resolveGrowthScoreFromScores,
+} from "@/services/audit/auditDetailBuilder"
+import {
+  getAuditListForUser,
+  getFindingsWithPagePathsForUser,
 } from "@/services/repositories/audit/provider"
 import type { Audit, Recommendation } from "@/types/audit"
 import type { DashboardMetric, OpportunityItem } from "@/types/dashboard"
-import type { AuditFinding, AuditSession } from "@/types/auditEngine"
+import type { AuditFinding } from "@/types/auditEngine"
+
+type WorkspaceData = {
+  audits: Audit[]
+  findings: AuditFinding[]
+  pagePathByPageId: Map<string, string>
+  completedGrowthScores: number[]
+  sessionCount: number
+  completedSessionCount: number
+}
 
 function severityToImpact(severity: AuditFinding["severity"]): OpportunityItem["impact"] {
   if (severity === "critical" || severity === "high") return "High"
@@ -14,49 +25,95 @@ function severityToImpact(severity: AuditFinding["severity"]): OpportunityItem["
   return "Low"
 }
 
-async function loadUserSessions(userId: string): Promise<AuditSession[]> {
-  return getSessionsByUserId(userId)
+function severityRank(severity: AuditFinding["severity"]): number {
+  return { critical: 0, high: 1, medium: 2, low: 3 }[severity]
 }
 
-export async function buildDashboardMetrics(userId: string): Promise<DashboardMetric[]> {
-  const sessions = await loadUserSessions(userId)
-  const completedSessions = sessions.filter((session) => session.status === "completed")
+async function loadWorkspaceData(userId: string): Promise<WorkspaceData> {
+  const inflight = inflightWorkspace.get(userId)
+  if (inflight) return inflight
 
-  const completedData = await Promise.all(
-    completedSessions.map((session) => getAuditSessionData(session.id))
-  )
+  const request = fetchWorkspaceData(userId).finally(() => {
+    inflightWorkspace.delete(userId)
+  })
 
-  const validData = completedData.filter((data) => data != null)
-  const growthScores = validData.map((data) => resolveGrowthScore(data))
+  inflightWorkspace.set(userId, request)
+  return request
+}
+
+const inflightWorkspace = new Map<string, Promise<WorkspaceData>>()
+
+async function fetchWorkspaceData(userId: string): Promise<WorkspaceData> {
+  const [listItems, findingsWithPaths] = await Promise.all([
+    getAuditListForUser(userId),
+    getFindingsWithPagePathsForUser(userId),
+  ])
+
+  const pagePathByPageId = new Map<string, string>()
+  const findings: AuditFinding[] = []
+
+  for (const { finding, pagePath } of findingsWithPaths) {
+    findings.push(finding)
+    if (finding.pageId && pagePath) {
+      pagePathByPageId.set(finding.pageId, pagePath)
+    }
+  }
+
+  const completedGrowthScores = listItems
+    .filter((item) => item.session.status === "completed")
+    .map((item) => resolveGrowthScoreFromScores(item.scores))
+    .filter((score) => score > 0)
+
+  const completedSessionCount = listItems.filter(
+    (item) => item.session.status === "completed"
+  ).length
+
+  return {
+    audits: listItems.map((item) =>
+      buildAuditListEntryFromSummary(item.session, item.pageCount, item.scores)
+    ),
+    findings,
+    pagePathByPageId,
+    completedGrowthScores,
+    sessionCount: listItems.length,
+    completedSessionCount,
+  }
+}
+
+function buildMetricsFromWorkspace(workspace: WorkspaceData): DashboardMetric[] {
   const averageGrowth =
-    growthScores.length > 0
-      ? Math.round(growthScores.reduce((sum, score) => sum + score, 0) / growthScores.length)
+    workspace.completedGrowthScores.length > 0
+      ? Math.round(
+          workspace.completedGrowthScores.reduce((sum, score) => sum + score, 0) /
+            workspace.completedGrowthScores.length
+        )
       : 0
 
-  const findings = await getFindingsByUserId(userId)
-  const criticalFindings = findings.filter((finding) => finding.severity === "critical").length
+  const criticalFindings = workspace.findings.filter(
+    (finding) => finding.severity === "critical"
+  ).length
 
   return [
     {
       id: "growth-score",
       label: "Growth Score",
       value: averageGrowth > 0 ? String(averageGrowth) : "—",
-      change: `${completedSessions.length} audits`,
+      change: `${workspace.completedSessionCount} audits`,
       trend: averageGrowth >= 70 ? "up" : averageGrowth > 0 ? "neutral" : "neutral",
       hint: "Average weighted score across completed audits",
     },
     {
       id: "total-audits",
       label: "Total audits",
-      value: String(sessions.length),
-      change: `${completedSessions.length} completed`,
+      value: String(workspace.sessionCount),
+      change: `${workspace.completedSessionCount} completed`,
       trend: "neutral",
       hint: "Audits in your workspace",
     },
     {
       id: "findings-count",
       label: "Findings",
-      value: String(findings.length),
+      value: String(workspace.findings.length),
       change: `${criticalFindings} critical`,
       trend: criticalFindings > 0 ? "down" : "up",
       hint: "Issues detected across all audits",
@@ -65,36 +122,25 @@ export async function buildDashboardMetrics(userId: string): Promise<DashboardMe
       id: "critical-findings",
       label: "Critical findings",
       value: String(criticalFindings),
-      change: findings.length > 0 ? `${Math.round((criticalFindings / findings.length) * 100)}%` : "0%",
+      change:
+        workspace.findings.length > 0
+          ? `${Math.round((criticalFindings / workspace.findings.length) * 100)}%`
+          : "0%",
       trend: criticalFindings > 0 ? "down" : "neutral",
       hint: "Highest-priority issues requiring action",
     },
   ]
 }
 
-export async function buildOpportunityQueue(userId: string): Promise<OpportunityItem[]> {
-  const findings = await getFindingsByUserId(userId)
-  const pagePathById = new Map<string, string>()
-
-  const auditIds = [...new Set(findings.map((finding) => finding.auditId))]
-  const sessionDataList = await Promise.all(auditIds.map((id) => getAuditSessionData(id)))
-
-  for (const sessionData of sessionDataList) {
-    if (!sessionData) continue
-    for (const page of sessionData.pages) {
-      pagePathById.set(page.id, page.path)
-    }
-  }
-
-  return [...findings]
-    .sort((a, b) => {
-      const rank = { critical: 0, high: 1, medium: 2, low: 3 }
-      return rank[a.severity] - rank[b.severity]
-    })
+function buildOpportunitiesFromWorkspace(workspace: WorkspaceData): OpportunityItem[] {
+  return [...workspace.findings]
+    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
     .slice(0, 5)
     .map((finding) => ({
       id: finding.id,
-      page: finding.pageId ? (pagePathById.get(finding.pageId) ?? "/") : "Site-wide",
+      page: finding.pageId
+        ? (workspace.pagePathByPageId.get(finding.pageId) ?? "/")
+        : "Site-wide",
       issue: finding.title,
       impact: severityToImpact(finding.severity),
       score: finding.severity === "critical" ? 95 : finding.severity === "high" ? 85 : 70,
@@ -102,14 +148,9 @@ export async function buildOpportunityQueue(userId: string): Promise<Opportunity
     }))
 }
 
-export async function buildDashboardRecommendations(userId: string): Promise<Recommendation[]> {
-  const findings = await getFindingsByUserId(userId)
-
-  return [...findings]
-    .sort((a, b) => {
-      const rank = { critical: 0, high: 1, medium: 2, low: 3 }
-      return rank[a.severity] - rank[b.severity]
-    })
+function buildRecommendationsFromWorkspace(workspace: WorkspaceData): Recommendation[] {
+  return [...workspace.findings]
+    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
     .slice(0, 4)
     .map((finding, index) => ({
       id: `rec-${finding.id}`,
@@ -121,21 +162,47 @@ export async function buildDashboardRecommendations(userId: string): Promise<Rec
     }))
 }
 
-export async function getUserAudits(userId: string): Promise<Audit[]> {
-  const sessions = await loadUserSessions(userId)
-  const audits: Audit[] = []
+export type DashboardBundle = {
+  metrics: DashboardMetric[]
+  opportunities: OpportunityItem[]
+  recommendations: Recommendation[]
+  audits: Audit[]
+  showOnboarding: boolean
+}
 
-  for (const session of sessions) {
-    const data = await getAuditSessionData(session.id)
-    if (data) {
-      audits.push(buildAuditListEntryFromSession(data))
-    }
+export async function buildDashboardBundle(userId: string): Promise<DashboardBundle> {
+  const workspace = await loadWorkspaceData(userId)
+
+  return {
+    metrics: buildMetricsFromWorkspace(workspace),
+    opportunities: buildOpportunitiesFromWorkspace(workspace),
+    recommendations: buildRecommendationsFromWorkspace(workspace),
+    audits: workspace.audits,
+    showOnboarding: workspace.sessionCount === 0,
   }
+}
 
-  return audits
+export async function getUserAudits(userId: string): Promise<Audit[]> {
+  const workspace = await loadWorkspaceData(userId)
+  return workspace.audits
 }
 
 export async function userHasAudits(userId: string): Promise<boolean> {
-  const sessions = await loadUserSessions(userId)
-  return sessions.length > 0
+  const listItems = await getAuditListForUser(userId)
+  return listItems.length > 0
+}
+
+export async function buildDashboardMetrics(userId: string): Promise<DashboardMetric[]> {
+  const workspace = await loadWorkspaceData(userId)
+  return buildMetricsFromWorkspace(workspace)
+}
+
+export async function buildOpportunityQueue(userId: string): Promise<OpportunityItem[]> {
+  const workspace = await loadWorkspaceData(userId)
+  return buildOpportunitiesFromWorkspace(workspace)
+}
+
+export async function buildDashboardRecommendations(userId: string): Promise<Recommendation[]> {
+  const workspace = await loadWorkspaceData(userId)
+  return buildRecommendationsFromWorkspace(workspace)
 }

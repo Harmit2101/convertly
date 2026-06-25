@@ -54,6 +54,9 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.listen(PORT, async () => {
-  console.info(`[PLAYWRIGHT] Render worker listening on port ${PORT}`)
-  await runBrowserStartupDiagnostics()
+  console.info(`[render-worker] Listening on port ${PORT}`)
+  const diagnostics = await runBrowserStartupDiagnostics()
+  if (!diagnostics.ok) {
+    console.error(`[render-worker] Startup diagnostics failed: ${diagnostics.error}`)
+  }
 })

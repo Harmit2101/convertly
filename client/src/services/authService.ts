@@ -212,6 +212,26 @@ export async function validateSession(): Promise<AuthSession | null> {
 
 
 
+export async function loadAuthState(options?: {
+  validate?: boolean
+}): Promise<{
+  session: AuthSession | null
+  account: AccountInfo | null
+}> {
+  if (shouldUseLocalAuth()) {
+    await delay(0)
+    const session = await authRepository.getStoredSession()
+    return {
+      session,
+      account: session ? buildAccountFromSession(session) : null,
+    }
+  }
+
+  return supabaseAuth.loadAuthState(options)
+}
+
+
+
 function buildAccountFromSession(session: AuthSession): AccountInfo {
 
   const fullName = `${session.firstName} ${session.lastName}`.trim()

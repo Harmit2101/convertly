@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 
 import { AuditRunningExperience } from "@/components/audit/AuditRunningExperience"
@@ -45,21 +45,7 @@ function NewAuditPage() {
   const [urlError, setUrlError] = useState<string | null>(null)
   const [urlWarning, setUrlWarning] = useState<string | null>(null)
   const [isRunning, setIsRunning] = useState(false)
-  const [activeAuditId, setActiveAuditId] = useState<string | null>(null)
   const [sessionStatus, setSessionStatus] = useState<AuditSessionStatus>("pending")
-
-  useEffect(() => {
-    if (!activeAuditId || !isRunning) return
-
-    const interval = window.setInterval(async () => {
-      const session = await auditService.getAuditSession(activeAuditId)
-      if (session) {
-        setSessionStatus(session.status)
-      }
-    }, 400)
-
-    return () => window.clearInterval(interval)
-  }, [activeAuditId, isRunning])
 
   const handleStartAudit = async () => {
     const validation = await auditService.validateAuditUrlInput(url)
@@ -76,14 +62,14 @@ function NewAuditPage() {
 
     try {
       const audit = await auditService.createAudit({ url: validation.sanitizedUrl })
-      setActiveAuditId(audit.id)
 
-      const finalStatus = await auditService.waitForAuditCompletion(audit.id)
+      const finalStatus = await auditService.waitForAuditCompletion(audit.id, {
+        onStatus: setSessionStatus,
+      })
 
       if (finalStatus === "failed") {
         setUrlError("Audit could not be completed. Check the URL and try again.")
         setIsRunning(false)
-        setActiveAuditId(null)
         return
       }
 
@@ -91,7 +77,6 @@ function NewAuditPage() {
     } catch {
       setUrlError("Unable to start audit. Please try again.")
       setIsRunning(false)
-      setActiveAuditId(null)
     }
   }
 

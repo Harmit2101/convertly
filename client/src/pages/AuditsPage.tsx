@@ -279,6 +279,7 @@ function AuditsPage() {
       )}
 
       <DeleteAuditModal
+        key={deleteTarget?.id ?? "closed"}
         open={deleteTarget != null}
         audit={deleteTarget}
         onClose={() => setDeleteTarget(null)}

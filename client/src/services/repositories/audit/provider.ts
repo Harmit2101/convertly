@@ -1,15 +1,18 @@
 import { shouldUseSupabaseAudits } from "@/lib/env"
+import { traceNetworkCall } from "@/diagnostics/networkTrace"
 import * as localFinding from "@/services/repositories/audit/auditFindingRepository"
 import * as localHistory from "@/services/repositories/audit/auditHistoryRepository"
 import * as localPage from "@/services/repositories/audit/auditPageRepository"
 import * as localScore from "@/services/repositories/audit/auditScoreRepository"
 import * as localSession from "@/services/repositories/audit/auditSessionRepository"
 import * as supabaseFinding from "@/services/repositories/audit/supabase/auditFindingRepository"
+import * as supabaseList from "@/services/repositories/audit/supabase/auditListRepository"
 import * as supabaseHistory from "@/services/repositories/audit/supabase/auditHistoryRepository"
 import * as supabasePage from "@/services/repositories/audit/supabase/auditPageRepository"
 import * as supabaseScore from "@/services/repositories/audit/supabase/auditScoreRepository"
 import { deleteAuditLocal } from "@/services/repositories/audit/localDeleteAudit"
 import * as supabaseSession from "@/services/repositories/audit/supabase/auditSessionRepository"
+import * as supabaseSessionData from "@/services/repositories/audit/supabase/auditSessionDataRepository"
 import type {
   AuditFinding,
   AuditHistoryEvent,
@@ -85,15 +88,61 @@ export async function getFindingsByAuditId(auditId: string): Promise<AuditFindin
 
 export async function getFindingsByUserId(userId: string): Promise<AuditFinding[]> {
   if (shouldUseSupabaseAudits()) {
-    const sessions = await supabaseSession.getSessionsByUserId(userId)
-    const findings = await Promise.all(
-      sessions.map((session) => supabaseFinding.getFindingsByAuditId(session.id))
-    )
-    return findings.flat()
+    const findings = await supabaseFinding.getFindingsForUser()
+    return findings.map((item) => item.finding)
   }
 
   const sessions = localSession.getSessionsByUserId(userId)
   return sessions.flatMap((session) => localFinding.getFindingsByAuditId(session.id))
+}
+
+export async function getFindingsWithPagePathsForUser(
+  userId: string
+): Promise<supabaseFinding.FindingWithPagePath[]> {
+  if (shouldUseSupabaseAudits()) {
+    return supabaseFinding.getFindingsForUser()
+  }
+
+  const sessions = localSession.getSessionsByUserId(userId)
+  const pagePathById = new Map<string, string>()
+
+  for (const session of sessions) {
+    for (const page of localPage.getPagesByAuditId(session.id)) {
+      pagePathById.set(page.id, page.path)
+    }
+  }
+
+  return sessions
+    .flatMap((session) => localFinding.getFindingsByAuditId(session.id))
+    .map((finding) => ({
+      finding,
+      pagePath: finding.pageId ? pagePathById.get(finding.pageId) : undefined,
+    }))
+}
+
+export type AuditListItem = supabaseList.AuditListItem
+
+export async function getAuditListForUser(userId: string): Promise<AuditListItem[]> {
+  if (shouldUseSupabaseAudits()) {
+    return supabaseList.getAuditListForUser(userId)
+  }
+
+  const sessions = localSession.getSessionsByUserId(userId)
+
+  return Promise.all(
+    sessions.map(async (session) => {
+      const [pages, scores] = await Promise.all([
+        localPage.getPagesByAuditId(session.id),
+        localScore.getScoresByAuditId(session.id),
+      ])
+
+      return {
+        session,
+        pageCount: pages.length,
+        scores,
+      }
+    })
+  )
 }
 
 export async function createScores(scores: AuditScore[]): Promise<AuditScore[]> {
@@ -145,7 +194,48 @@ export async function getHistoryByAuditId(auditId: string): Promise<AuditHistory
   return localHistory.getHistoryByAuditId(auditId)
 }
 
+const inflightSessionData = new Map<string, Promise<AuditSessionData | null>>()
+const completedSessionCache = new Map<string, AuditSessionData>()
+
+export function clearCompletedAuditCache(auditId?: string): void {
+  if (auditId) {
+    completedSessionCache.delete(auditId)
+    inflightSessionData.delete(auditId)
+    return
+  }
+
+  completedSessionCache.clear()
+  inflightSessionData.clear()
+}
+
 export async function getAuditSessionData(auditId: string): Promise<AuditSessionData | null> {
+  if (shouldUseSupabaseAudits()) {
+    const cached = completedSessionCache.get(auditId)
+    if (cached) return cached
+
+    const inflight = inflightSessionData.get(auditId)
+    if (inflight) return inflight
+
+    const request = traceNetworkCall(`getAuditSessionData:${auditId}`, () =>
+      supabaseSessionData.getAuditSessionDataById(auditId)
+    )
+      .then((data) => {
+        if (
+          data &&
+          (data.session.status === "completed" || data.session.status === "failed")
+        ) {
+          completedSessionCache.set(auditId, data)
+        }
+        return data
+      })
+      .finally(() => {
+        inflightSessionData.delete(auditId)
+      })
+
+    inflightSessionData.set(auditId, request)
+    return request
+  }
+
   const session = await getSessionById(auditId)
   if (!session) return null
 
@@ -161,6 +251,7 @@ export async function getAuditSessionData(auditId: string): Promise<AuditSession
 
 export async function deleteAudit(auditId: string): Promise<void> {
   if (shouldUseSupabaseAudits()) {
+    clearCompletedAuditCache(auditId)
     await supabaseSession.deleteAudit(auditId)
     return
   }

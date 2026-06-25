@@ -1,7 +1,7 @@
 import { ClipboardList, LogOut, User } from "lucide-react"
 import { Link, NavLink, useNavigate } from "react-router-dom"
 
-import { useAuthSession } from "@/components/auth/AuthSessionProvider"
+import { useAuthSession } from "@/hooks/useAuthSession"
 import {
   primaryNavItems,
   secondaryNavItems,

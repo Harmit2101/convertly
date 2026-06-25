@@ -12,6 +12,7 @@ import type {
 } from "@/types/audit"
 import type {
   AuditPageType,
+  AuditScore,
   AuditSessionData,
   AuditScoreCategory,
   FindingSeverity,
@@ -165,14 +166,20 @@ function mapHistoryToTimeline(data: AuditSessionData): TimelineEvent[] {
   }))
 }
 
-export function resolveGrowthScore(data: AuditSessionData): number {
-  const growth = data.scores.find((score) => score.category === "growth")
+export function resolveGrowthScoreFromScores(
+  scores: Pick<AuditScore, "category" | "score">[]
+): number {
+  const growth = scores.find((score) => score.category === "growth")
   if (growth?.score != null) return Math.round(growth.score)
 
-  const overall = data.scores.find((score) => score.category === "overall")
+  const overall = scores.find((score) => score.category === "overall")
   if (overall?.score != null) return Math.round(overall.score)
 
   return 0
+}
+
+export function resolveGrowthScore(data: AuditSessionData): number {
+  return resolveGrowthScoreFromScores(data.scores)
 }
 
 function buildScoreBreakdown(data: AuditSessionData): ScoreBreakdownItem[] {
@@ -231,16 +238,28 @@ export function buildAuditDetailFromSession(data: AuditSessionData): AuditDetail
 }
 
 export function buildAuditListEntryFromSession(data: AuditSessionData) {
-  const domain = parseDomainFromUrl(data.session.websiteUrl)
+  return buildAuditListEntryFromSummary(
+    data.session,
+    data.pages.length,
+    data.scores
+  )
+}
+
+export function buildAuditListEntryFromSummary(
+  session: AuditSessionData["session"],
+  pageCount: number,
+  scores: AuditSessionData["scores"]
+) {
+  const domain = parseDomainFromUrl(session.websiteUrl)
 
   return {
-    id: data.session.id,
+    id: session.id,
     name: buildAuditName(domain),
     domain,
-    websiteUrl: data.session.websiteUrl,
-    completedAt: formatDisplayDate(data.session.updatedAt),
-    pagesScanned: data.pages.length,
-    conversionScore: resolveGrowthScore(data),
-    status: data.session.status,
+    websiteUrl: session.websiteUrl,
+    completedAt: formatDisplayDate(session.updatedAt),
+    pagesScanned: pageCount,
+    conversionScore: resolveGrowthScoreFromScores(scores),
+    status: session.status,
   }
 }

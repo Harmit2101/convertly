@@ -4,20 +4,9 @@ import { getJson, removeItem, setJson } from "@/services/storage/sessionStorageC
 const STORAGE_KEY = "convertly.auth.password-recovery"
 const COMPLETED_KEY = "convertly.auth.password-recovery-completed"
 
-const RECOVERY_DEBUG = import.meta.env.DEV
-
 export type PasswordRecoveryPersistedState = {
   active: boolean
   activatedAt: string
-}
-
-function logRecovery(message: string, detail?: unknown): void {
-  if (!RECOVERY_DEBUG) return
-  if (detail === undefined) {
-    console.info(`[password-recovery] ${message}`)
-    return
-  }
-  console.info(`[password-recovery] ${message}`, detail)
 }
 
 function readActiveState(): PasswordRecoveryPersistedState | null {
@@ -52,7 +41,6 @@ export function isPasswordRecoveryActive(): boolean {
 
 export function activatePasswordRecovery(): void {
   if (isRecoveryCompleted()) {
-    logRecovery("skipped activation because recovery was already completed")
     return
   }
 
@@ -61,12 +49,10 @@ export function activatePasswordRecovery(): void {
     active: true,
     activatedAt: new Date().toISOString(),
   })
-  logRecovery("persistence created", readActiveState())
 }
 
 export function clearPasswordRecovery(): void {
   removeItem(STORAGE_KEY)
-  logRecovery("persistence cleared")
 }
 
 /**
@@ -76,7 +62,6 @@ export function clearPasswordRecovery(): void {
 export function finalizePasswordRecovery(): void {
   clearPasswordRecovery()
   markRecoveryCompleted()
-  logRecovery("recovery flow finalized")
 }
 
 /**
@@ -84,7 +69,6 @@ export function finalizePasswordRecovery(): void {
  */
 export function bootstrapPasswordRecoveryFromUrl(): void {
   if (isRecoveryCompleted()) {
-    logRecovery("skipped URL bootstrap because recovery was already completed")
     return
   }
 

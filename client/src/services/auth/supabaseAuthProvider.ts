@@ -1,12 +1,6 @@
-import {
-  FunctionsFetchError,
-  FunctionsHttpError,
-  FunctionsRelayError,
-  type User,
-} from "@supabase/supabase-js"
+import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js"
 
 import { getEmailConfirmationRedirectUrl, getPasswordResetRedirectUrl } from "@/lib/authRedirects"
-import { logAuthEvent } from "@/lib/authDebugLog"
 import {
   activatePasswordRecovery,
   bootstrapPasswordRecoveryFromUrl,
@@ -14,7 +8,7 @@ import {
   isPasswordRecoveryActive,
   isPasswordRecoveryCompleted,
 } from "@/lib/passwordRecoveryPersistence"
-import { ROUTES } from "@/lib/routes"
+import { getAuthSnapshot, getCachedAuthSession } from "@/lib/authSessionCache"
 import { getSupabaseClient } from "@/services/auth/supabaseClient"
 import type { AccountInfo, ChangePasswordInput, UpdateProfileInput } from "@/types/account"
 import type {
@@ -71,59 +65,8 @@ function resolveAuthProvider(user: User): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1)
 }
 
-export function subscribeToAuthChanges(onChange: () => void): () => void {
-  const supabase = getSupabaseClient()
-  const {
-    data: { subscription },
-  } = supabase.auth.onAuthStateChange((event) => {
-    logAuthEvent(event)
-    onChange()
-  })
-
-  return () => subscription.unsubscribe()
-}
-
-export async function getValidatedSession(): Promise<AuthSession | null> {
-  const supabase = getSupabaseClient()
-  const { data: sessionData } = await supabase.auth.getSession()
-  const cachedUser = sessionData.session?.user
-
-  if (!cachedUser) {
-    return null
-  }
-
-  const { data, error } = await supabase.auth.getUser()
-
-  if (!error && data.user) {
-    return mapUserToSession(data.user)
-  }
-
-  const message = error?.message.toLowerCase() ?? ""
-  const isAuthError =
-    error?.status === 401 ||
-    message.includes("jwt") ||
-    message.includes("invalid") ||
-    message.includes("expired") ||
-    message.includes("session")
-
-  if (isAuthError) {
-    await supabase.auth.signOut().catch(() => undefined)
-    return null
-  }
-
-  // Preserve signed-in state across refresh when validation is temporarily unavailable.
-  return mapUserToSession(cachedUser)
-}
-
-export async function getAccountInfo(): Promise<AccountInfo | null> {
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase.auth.getUser()
-
-  if (error || !data.user) {
-    return null
-  }
-
-  const profile = mapUserToProfile(data.user)
+function mapUserToAccountInfo(user: User): AccountInfo {
+  const profile = mapUserToProfile(user)
   const fullName = `${profile.firstName} ${profile.lastName}`.trim()
   const displayName = fullName || profile.email
 
@@ -136,8 +79,105 @@ export async function getAccountInfo(): Promise<AccountInfo | null> {
     initials: buildInitials(profile.firstName, profile.lastName, profile.email),
     createdAt: profile.createdAt,
     plan: "Free",
-    authProvider: resolveAuthProvider(data.user),
+    authProvider: resolveAuthProvider(user),
   }
+}
+
+export function authStateFromUser(user: User): {
+  session: AuthSession
+  account: AccountInfo
+} {
+  return {
+    session: mapUserToSession(user),
+    account: mapUserToAccountInfo(user),
+  }
+}
+
+type AuthStateResult = {
+  session: AuthSession | null
+  account: AccountInfo | null
+}
+
+const loadAuthInflight = new Map<string, Promise<AuthStateResult>>()
+
+export async function loadAuthState(options?: {
+  validate?: boolean
+}): Promise<AuthStateResult> {
+  const validate = options?.validate ?? false
+  const inflightKey = validate ? "validate" : "session"
+  const inflight = loadAuthInflight.get(inflightKey)
+  if (inflight) return inflight
+
+  const request = fetchAuthState(validate).finally(() => {
+    loadAuthInflight.delete(inflightKey)
+  })
+
+  loadAuthInflight.set(inflightKey, request)
+  return request
+}
+
+async function fetchAuthState(validate: boolean): Promise<AuthStateResult> {
+  const supabase = getSupabaseClient()
+  const { data: sessionData } = await supabase.auth.getSession()
+  const cachedUser = sessionData.session?.user
+
+  if (!cachedUser) {
+    return { session: null, account: null }
+  }
+
+  if (!validate) {
+    return authStateFromUser(cachedUser)
+  }
+
+  const { data, error } = await supabase.auth.getUser()
+
+  if (!error && data.user) {
+    return authStateFromUser(data.user)
+  }
+
+  const message = error?.message.toLowerCase() ?? ""
+  const isAuthError =
+    error?.status === 401 ||
+    message.includes("jwt") ||
+    message.includes("invalid") ||
+    message.includes("expired") ||
+    message.includes("session")
+
+  if (isAuthError) {
+    await supabase.auth.signOut().catch(() => undefined)
+    return { session: null, account: null }
+  }
+
+  return authStateFromUser(cachedUser)
+}
+
+export function subscribeToAuthChanges(
+  onChange: (event: AuthChangeEvent, session: Session | null) => void
+): () => void {
+  const supabase = getSupabaseClient()
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((event, session) => {
+    setTimeout(() => onChange(event, session), 0)
+  })
+
+  return () => subscription.unsubscribe()
+}
+
+export async function getValidatedSession(): Promise<AuthSession | null> {
+  const cached = getCachedAuthSession()
+  if (cached) return cached
+
+  const state = await loadAuthState({ validate: false })
+  return state.session
+}
+
+export async function getAccountInfo(): Promise<AccountInfo | null> {
+  const cached = getAuthSnapshot().account
+  if (cached) return cached
+
+  const state = await loadAuthState({ validate: false })
+  return state.account
 }
 
 function buildInitials(firstName: string, lastName: string, email: string): string {
@@ -151,6 +191,9 @@ function buildInitials(firstName: string, lastName: string, email: string): stri
 }
 
 export async function getCurrentSession(): Promise<AuthSession | null> {
+  const cached = getCachedAuthSession()
+  if (cached) return cached
+
   const supabase = getSupabaseClient()
   const { data, error } = await supabase.auth.getSession()
 
@@ -316,7 +359,6 @@ export function subscribeToPasswordRecovery(onRecovery: () => void): () => void 
     data: { subscription },
   } = supabase.auth.onAuthStateChange((event) => {
     if (event === "PASSWORD_RECOVERY") {
-      logAuthEvent(event)
       activatePasswordRecovery()
       onRecovery()
     }

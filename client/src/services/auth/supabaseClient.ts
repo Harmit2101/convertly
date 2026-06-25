@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 
+import { createTracedFetch } from "@/diagnostics/networkTrace"
 import { env, isSupabaseConfigured } from "@/lib/env"
 import type { Database } from "@/types/database"
 
@@ -17,6 +18,7 @@ export function getSupabaseClient(): SupabaseClient<Database> {
   }
 
   if (!supabaseClient) {
+    const shouldTrace = import.meta.env.VITE_NETWORK_TRACE === "true"
     supabaseClient = createClient<Database>(
       normalizeSupabaseUrl(env.supabaseUrl),
       env.supabaseAnonKey,
@@ -26,6 +28,11 @@ export function getSupabaseClient(): SupabaseClient<Database> {
           autoRefreshToken: true,
           detectSessionInUrl: true,
         },
+        global: shouldTrace
+          ? {
+              fetch: createTracedFetch(),
+            }
+          : undefined,
       }
     )
   }

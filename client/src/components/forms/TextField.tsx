@@ -21,7 +21,8 @@ function TextField({
   className,
   ...props
 }: TextFieldProps) {
-  const fieldId = id ?? React.useId()
+  const generatedId = React.useId()
+  const fieldId = id ?? generatedId
   const hintId = hint ? `${fieldId}-hint` : undefined
   const errorId = error ? `${fieldId}-error` : undefined
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined

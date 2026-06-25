@@ -2,7 +2,8 @@ import { useEffect } from "react"
 import { Outlet, useLocation } from "react-router-dom"
 
 import { ConvertlyLogoLink } from "@/components/brand/ConvertlyLogo"
-import { AuthPanelProvider, useAuthPanel } from "@/components/auth/AuthPanelContext"
+import { AuthPanelProvider } from "@/components/auth/AuthPanelProvider"
+import { useAuthPanel } from "@/hooks/useAuthPanel"
 import { AuthRotatingPanel } from "@/components/auth/AuthRotatingPanel"
 import { ROUTES } from "@/lib/routes"
 
@@ -16,7 +17,7 @@ function AuthLayoutContent() {
   }, [location.pathname, closeLegal])
 
   return (
-    <div className="app-atmosphere min-h-screen">
+    <div className="app-atmosphere min-h-dvh">
       <div className="auth-layout-grid">
         <div className="auth-form-column">
           <div className="auth-form-column-mobile lg:hidden">

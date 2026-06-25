@@ -5,11 +5,11 @@ import { DashboardTopBar } from "@/components/layout/DashboardTopBar"
 
 function DashboardLayout() {
   return (
-    <div className="app-atmosphere flex h-screen min-h-screen flex-col overflow-hidden lg:flex-row">
+    <div className="app-atmosphere flex min-h-dvh flex-col lg:h-dvh lg:max-h-dvh lg:flex-row lg:overflow-hidden">
       <DashboardSidebar />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
         <DashboardTopBar />
-        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <main className="flex-1 lg:min-h-0 lg:overflow-x-clip lg:overflow-y-auto lg:overscroll-y-contain lg:[-webkit-overflow-scrolling:touch]">
           <Outlet />
         </main>
       </div>

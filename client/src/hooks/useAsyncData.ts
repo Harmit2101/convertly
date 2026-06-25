@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 export type QueryStatus = "idle" | "loading" | "success" | "error" | "empty"
 
@@ -10,7 +10,7 @@ export type AsyncState<T> = {
   isError: boolean
   isEmpty: boolean
   isSuccess: boolean
-  reload: () => void
+  reload: (options?: { silent?: boolean }) => void
 }
 
 type UseAsyncDataOptions<T> = {
@@ -28,22 +28,26 @@ export function useAsyncData<T>(
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<QueryStatus>("idle")
   const [reloadToken, setReloadToken] = useState(0)
+  const silentReloadRef = useRef(false)
 
-  const reload = useCallback(() => {
+  const reload = useCallback((reloadOptions?: { silent?: boolean }) => {
+    silentReloadRef.current = reloadOptions?.silent ?? false
     setReloadToken((value) => value + 1)
   }, [])
 
   useEffect(() => {
-    if (!enabled) {
-      setStatus("idle")
-      return
-    }
+    if (!enabled) return
 
     let cancelled = false
+    const silent = silentReloadRef.current
+    silentReloadRef.current = false
 
     async function run() {
-      setStatus("loading")
-      setError(null)
+      if (!silent) {
+        setStatus("loading")
+        setError(null)
+      }
+
       try {
         const result = await fetcher()
         if (cancelled) return
@@ -71,7 +75,7 @@ export function useAsyncData<T>(
     data,
     error,
     status,
-    isLoading: status === "loading" || status === "idle",
+    isLoading: enabled && (status === "loading" || status === "idle"),
     isError: status === "error",
     isEmpty: status === "empty",
     isSuccess: status === "success",

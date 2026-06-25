@@ -1,6 +1,5 @@
 import { Check, Clock } from "lucide-react"
 
-import { EmptyState } from "@/components/feedback/EmptyState"
 import { Card } from "@/components/surfaces/Card"
 import { Text } from "@/components/ui/typography/Text"
 import type { TimelineEvent } from "@/types/audit"
@@ -15,7 +14,7 @@ function AuditTimelineSection({ events, compact = false }: AuditTimelineSectionP
   if (!compact) return null
 
   return (
-    <Card className="app-card-metric h-full hover:translate-y-0">
+    <Card className="audit-report-timeline app-card-metric h-full hover:translate-y-0">
       <Text
         variant="muted"
         size="sm"
@@ -24,11 +23,12 @@ function AuditTimelineSection({ events, compact = false }: AuditTimelineSectionP
         Audit timeline
       </Text>
       {events.length === 0 ? (
-        <EmptyState
-          icon={Clock}
-          title="No timeline events"
-          description="No timeline events have been recorded for this audit yet."
-        />
+        <div className="rounded-[var(--radius-md)] border border-dashed border-[color-mix(in_srgb,var(--border)_55%,transparent)] bg-[color-mix(in_srgb,var(--surface)_35%,transparent)] px-4 py-5 text-center">
+          <Clock className="mx-auto size-4 text-muted" aria-hidden />
+          <Text variant="muted" size="sm" className="mt-2 max-w-none text-xs leading-5">
+            Timeline events will appear as the audit progresses.
+          </Text>
+        </div>
       ) : (
         <ol className="space-y-0">
           {events.map((event, index) => (

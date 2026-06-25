@@ -22,18 +22,15 @@ const STATUS_TO_PHASE_INDEX: Partial<Record<AuditSessionStatus, number>> = {
 }
 
 function AuditRunningExperience({ status = "pending", className }: AuditRunningExperienceProps) {
-  const [phaseIndex, setPhaseIndex] = useState(0)
-
-  useEffect(() => {
-    const targetIndex = STATUS_TO_PHASE_INDEX[status] ?? 0
-    setPhaseIndex((current) => Math.max(current, targetIndex))
-  }, [status])
+  const statusFloor = STATUS_TO_PHASE_INDEX[status] ?? 0
+  const [tickIndex, setTickIndex] = useState(0)
+  const phaseIndex = Math.max(tickIndex, statusFloor)
 
   useEffect(() => {
     if (status === "completed" || status === "failed") return
 
     const interval = window.setInterval(() => {
-      setPhaseIndex((current) => {
+      setTickIndex((current) => {
         const cap = STATUS_TO_PHASE_INDEX[status] ?? AUDIT_LOADING_PHASES.length - 1
         if (current >= cap) return current
         return current + 1

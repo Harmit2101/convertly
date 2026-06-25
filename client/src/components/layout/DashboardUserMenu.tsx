@@ -3,7 +3,7 @@ import { CreditCard, LogOut, Settings, User } from "lucide-react"
 import * as React from "react"
 import { Link, useNavigate } from "react-router-dom"
 
-import { useAuthSession } from "@/components/auth/AuthSessionProvider"
+import { useAuthSession } from "@/hooks/useAuthSession"
 import { ROUTES } from "@/lib/routes"
 import { cn } from "@/lib/utils"
 

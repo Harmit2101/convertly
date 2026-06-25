@@ -10,7 +10,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "capture:audit-network": "node scripts/capture-audit-detail-network.mjs",
+    "measure:api-calls": "node scripts/measure-api-calls.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

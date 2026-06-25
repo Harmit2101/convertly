@@ -13,8 +13,9 @@ import * as authService from "@/services/authService"
 function ResetPasswordPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const isLocalAuth = shouldUseLocalAuth()
   const [isRecoveryReady, setIsRecoveryReady] = useState(false)
-  const [isCheckingSession, setIsCheckingSession] = useState(true)
+  const [isCheckingSession, setIsCheckingSession] = useState(() => !isLocalAuth)
 
   useLayoutEffect(() => {
     if (shouldUseLocalAuth()) return
@@ -22,10 +23,7 @@ function ResetPasswordPage() {
   }, [])
 
   useEffect(() => {
-    if (shouldUseLocalAuth()) {
-      setIsCheckingSession(false)
-      return
-    }
+    if (isLocalAuth) return
 
     let cancelled = false
 
@@ -53,7 +51,7 @@ function ResetPasswordPage() {
       cancelled = true
       unsubscribe()
     }
-  }, [])
+  }, [isLocalAuth])
 
   useEffect(() => {
     if (!isRecoveryReady || isCheckingSession) return

@@ -24,20 +24,14 @@ type DashboardData = {
 }
 
 async function loadDashboard(): Promise<DashboardData> {
-  const [metrics, opportunities, recommendations, audits, hasUser] = await Promise.all([
-    auditService.getDashboardMetrics(),
-    auditService.getOpportunityQueue(),
-    auditService.getDashboardRecommendations(),
-    auditService.getAudits(),
-    auditService.hasUserAudits(),
-  ])
+  const bundle = await auditService.getDashboardData()
 
   return {
-    metrics,
-    opportunities,
-    recommendations,
-    audits,
-    showOnboarding: !hasUser,
+    metrics: bundle.metrics,
+    opportunities: bundle.opportunities,
+    recommendations: bundle.recommendations,
+    audits: bundle.audits,
+    showOnboarding: bundle.showOnboarding,
   }
 }
 

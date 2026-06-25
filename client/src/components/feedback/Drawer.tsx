@@ -1,6 +1,7 @@
 import { X } from "lucide-react"
 import { useEffect, type ReactNode } from "react"
 
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 import { cn } from "@/lib/utils"
 
 type DrawerProps = {
@@ -26,14 +27,7 @@ function Drawer({
   contentClassName,
   side = "right",
 }: DrawerProps) {
-  useEffect(() => {
-    if (!open) return
-    const previous = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      document.body.style.overflow = previous
-    }
-  }, [open])
+  useBodyScrollLock(open)
 
   useEffect(() => {
     if (!open) return

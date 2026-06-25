@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { Heading } from "@/components/ui/typography/Heading"
 import { Text } from "@/components/ui/typography/Text"
-import { useAuthPanel } from "@/components/auth/AuthPanelContext"
+import { useAuthPanel } from "@/hooks/useAuthPanel"
 import { legalContent, type AuthLegalView } from "@/features/auth/content/authContent"
 
 type AuthLegalPanelProps = {

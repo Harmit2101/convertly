@@ -3,7 +3,6 @@ import type { ReactNode } from "react"
 
 import { ConvertlyMarkAnimated } from "@/components/brand/ConvertlyMarkAnimated"
 import { EmptyState } from "@/components/feedback/EmptyState"
-import { Button } from "@/components/ui/button"
 import { Card } from "@/components/surfaces/Card"
 import { Text } from "@/components/ui/typography/Text"
 

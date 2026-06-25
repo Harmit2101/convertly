@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { Navigate, useLocation } from "react-router-dom"
 
-import { useAuthSession } from "@/components/auth/AuthSessionProvider"
+import { useAuthSession } from "@/hooks/useAuthSession"
 import { AuthFormMessage } from "@/components/auth/AuthFormMessage"
 import { Navbar } from "@/components/layout/Navbar"
 import { CtaSection } from "@/features/home/sections/CtaSection"
@@ -43,7 +43,7 @@ function HomePage() {
   }
 
   return (
-    <main className="marketing-page app-atmosphere overflow-x-hidden">
+    <main className="marketing-page app-atmosphere overflow-x-clip">
       {deletedNotice ? (
         <div className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
           <AuthFormMessage variant="success" className="max-w-md shadow-[var(--shadow-medium)]">

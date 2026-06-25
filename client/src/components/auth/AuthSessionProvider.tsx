@@ -1,53 +1,54 @@
 import * as React from "react"
+import type { AuthChangeEvent } from "@supabase/supabase-js"
 
+import { AuthSessionContext } from "@/components/auth/authSessionContext"
+import { clearAuthSnapshot, setAuthSnapshot } from "@/lib/authSessionCache"
 import { shouldUseLocalAuth } from "@/lib/env"
-import {
-  logAuthInit,
-  logAuthLoading,
-  logAuthSessionFound,
-  logAuthSessionNull,
-} from "@/lib/authDebugLog"
 import { bootstrapPasswordRecoveryFromUrl } from "@/lib/passwordRecoveryPersistence"
 import * as authService from "@/services/authService"
 import * as supabaseAuth from "@/services/auth/supabaseAuthProvider"
 import type { AuthSession } from "@/types/auth"
 import type { AccountInfo } from "@/types/account"
 
-type AuthSessionContextValue = {
-  session: AuthSession | null
-  account: AccountInfo | null
-  isLoading: boolean
-  isAuthenticated: boolean
-  refreshSession: () => Promise<void>
-  logout: () => Promise<void>
-}
+const SESSION_EVENTS = new Set<AuthChangeEvent>([
+  "SIGNED_IN",
+  "TOKEN_REFRESHED",
+  "USER_UPDATED",
+])
 
-const AuthSessionContext = React.createContext<AuthSessionContextValue | null>(null)
+function applyAuthState(
+  setSession: React.Dispatch<React.SetStateAction<AuthSession | null>>,
+  setAccount: React.Dispatch<React.SetStateAction<AccountInfo | null>>,
+  state: { session: AuthSession | null; account: AccountInfo | null }
+) {
+  setSession(state.session)
+  setAccount(state.account)
+  setAuthSnapshot(state)
+}
 
 function AuthSessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = React.useState<AuthSession | null>(null)
   const [account, setAccount] = React.useState<AccountInfo | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
+  const refreshInFlight = React.useRef<Promise<void> | null>(null)
 
   const refreshSession = React.useCallback(async () => {
-    logAuthLoading(true)
-    setIsLoading(true)
+    if (refreshInFlight.current) {
+      await refreshInFlight.current
+      return
+    }
+
+    const task = (async () => {
+      const next = await authService.loadAuthState({ validate: true })
+      applyAuthState(setSession, setAccount, next)
+    })()
+
+    refreshInFlight.current = task
 
     try {
-      const nextSession = await authService.validateSession()
-      setSession(nextSession)
-
-      if (nextSession) {
-        logAuthSessionFound()
-        const nextAccount = await authService.getAccount()
-        setAccount(nextAccount)
-      } else {
-        logAuthSessionNull()
-        setAccount(null)
-      }
+      await task
     } finally {
-      setIsLoading(false)
-      logAuthLoading(false)
+      refreshInFlight.current = null
     }
   }, [])
 
@@ -55,34 +56,71 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
     await authService.logout()
     setSession(null)
     setAccount(null)
+    clearAuthSnapshot()
   }, [])
 
   React.useLayoutEffect(() => {
-    logAuthInit()
     if (shouldUseLocalAuth()) return
     bootstrapPasswordRecoveryFromUrl()
   }, [])
 
   React.useEffect(() => {
-    void refreshSession()
+    let cancelled = false
 
-    if (shouldUseLocalAuth()) {
-      return
+    async function bootstrap() {
+      setIsLoading(true)
+      try {
+        const next = await authService.loadAuthState({ validate: true })
+        if (!cancelled) {
+          applyAuthState(setSession, setAccount, next)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      }
     }
 
-    const unsubscribeAuth = supabaseAuth.subscribeToAuthChanges(() => {
-      void refreshSession()
-    })
+    void bootstrap()
 
-    const unsubscribeRecovery = authService.subscribeToPasswordRecovery(() => {
-      void refreshSession()
+    if (shouldUseLocalAuth()) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const unsubscribeAuth = supabaseAuth.subscribeToAuthChanges((event, authSession) => {
+      if (event === "INITIAL_SESSION") {
+        return
+      }
+
+      if (event === "SIGNED_OUT") {
+        setSession(null)
+        setAccount(null)
+        clearAuthSnapshot()
+        return
+      }
+
+      if (!SESSION_EVENTS.has(event)) {
+        return
+      }
+
+      const user = authSession?.user
+      if (!user) {
+        setSession(null)
+        setAccount(null)
+        return
+      }
+
+      const next = supabaseAuth.authStateFromUser(user)
+      applyAuthState(setSession, setAccount, next)
     })
 
     return () => {
+      cancelled = true
       unsubscribeAuth()
-      unsubscribeRecovery()
     }
-  }, [refreshSession])
+  }, [])
 
   const value = React.useMemo(
     () => ({
@@ -101,12 +139,4 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-function useAuthSession() {
-  const context = React.useContext(AuthSessionContext)
-  if (!context) {
-    throw new Error("useAuthSession must be used within AuthSessionProvider")
-  }
-  return context
-}
-
-export { AuthSessionProvider, useAuthSession }
+export { AuthSessionProvider }

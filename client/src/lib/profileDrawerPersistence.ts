@@ -49,9 +49,8 @@ export function persistEditDrawerState(state: EditDrawerPersistedState): void {
 }
 
 export function clearEditDrawerState(): void {
-  const current = readState()
-  const { edit: _edit, ...rest } = current
-  writeState(rest)
+  const { password } = readState()
+  writeState(password ? { password } : {})
 }
 
 export function readPasswordDrawerState(): PasswordDrawerPersistedState | null {
@@ -65,9 +64,8 @@ export function persistPasswordDrawerState(state: PasswordDrawerPersistedState):
 }
 
 export function clearPasswordDrawerState(): void {
-  const current = readState()
-  const { password: _password, ...rest } = current
-  writeState(rest)
+  const { edit } = readState()
+  writeState(edit ? { edit } : {})
 }
 
 export function clearAllProfileDrawerState(): void {

@@ -109,7 +109,7 @@ function SampleReportContent({ audit }: { audit: AuditDetail }) {
         <AuditTimelineSection events={audit.timeline} compact />
       </div>
 
-      <ScoreBreakdownSection categories={audit.scoreBreakdown} />
+      <ScoreBreakdownSection categories={audit.scoreBreakdown} auditStatus={audit.status} />
       <PageFindingsSection pages={audit.pageFindings} auditStatus={audit.status} />
       <PrioritizedIssuesSection issues={audit.issues} auditStatus={audit.status} />
       <AuditRecommendationsSection recommendations={audit.recommendations} />

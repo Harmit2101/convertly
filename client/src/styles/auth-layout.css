@@ -130,6 +130,8 @@
   width: 100%;
   min-height: 0;
   flex-direction: column;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 .auth-layout-grid > .auth-form-column {

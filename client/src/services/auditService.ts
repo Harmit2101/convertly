@@ -3,8 +3,10 @@ import { auditDetailsMap } from "@/features/audits/data/auditDetails"
 import {
   buildAuditDetailFromSession,
   buildAuditListEntryFromSession,
+  buildAuditListEntryFromSummary,
 } from "@/services/audit/auditDetailBuilder"
 import {
+  buildDashboardBundle,
   buildDashboardMetrics,
   buildDashboardRecommendations,
   buildOpportunityQueue,
@@ -16,13 +18,20 @@ import * as auditDetailRepository from "@/services/internal/auditDetailRepositor
 import * as auditListRepository from "@/services/internal/auditListRepository"
 import * as authService from "@/services/authService"
 import {
+  clearCompletedAuditCache,
   createHistoryEvent,
   createSession,
   deleteAudit as deleteAuditRecord,
+  getAuditListForUser,
   getAuditSessionData,
   getSessionById,
-  getSessionsByUserId,
 } from "@/services/repositories/audit/provider"
+import {
+  clearCompletedAuditDetail,
+  getCompletedAuditDetail,
+  setCompletedAuditDetail,
+} from "@/lib/completedAuditCache"
+import { getCachedAuthSession } from "@/lib/authSessionCache"
 import { isDeletableAudit, isSampleAuditId } from "@/lib/auditHistoryUtils"
 import { shouldUseSupabaseAudits } from "@/lib/env"
 import { validateAuditUrl } from "@/lib/auditUrlValidation"
@@ -39,23 +48,16 @@ import type { DashboardMetric, OpportunityItem } from "@/types/dashboard"
 const SAMPLE_AUDIT_ID = "audit-1"
 
 async function resolveUserId(): Promise<string> {
-  const session = await authService.getSession()
+  const session = getCachedAuthSession() ?? (await authService.getSession())
   return session?.userId ?? "anonymous"
 }
 
 async function loadUserAudits(userId: string): Promise<Audit[]> {
   if (shouldUseSupabaseAudits()) {
-    const sessions = await getSessionsByUserId(userId)
-    const audits: Audit[] = []
-
-    for (const session of sessions) {
-      const data = await getAuditSessionData(session.id)
-      if (data) {
-        audits.push(buildAuditListEntryFromSession(data))
-      }
-    }
-
-    return audits
+    const listItems = await getAuditListForUser(userId)
+    return listItems.map((item) =>
+      buildAuditListEntryFromSummary(item.session, item.pageCount, item.scores)
+    )
   }
 
   return auditListRepository.getAllAudits()
@@ -86,6 +88,11 @@ export async function getAuditById(id: string): Promise<Audit | null> {
   return auditListRepository.getAuditById(id) ?? null
 }
 
+export function invalidateCompletedAuditDetail(id: string): void {
+  clearCompletedAuditDetail(id)
+  clearCompletedAuditCache(id)
+}
+
 export async function getAuditDetail(id: string): Promise<AuditDetail | null> {
   await delay()
 
@@ -93,10 +100,16 @@ export async function getAuditDetail(id: string): Promise<AuditDetail | null> {
     return auditDetailsMap[id] ?? null
   }
 
+  const cachedDetail = getCompletedAuditDetail(id)
+  if (cachedDetail) return cachedDetail
+
   const sessionData = await getAuditSessionData(id)
   if (sessionData) {
     const detail = buildAuditDetailFromSession(sessionData)
-    auditDetailRepository.saveAuditDetail(detail)
+    setCompletedAuditDetail(detail)
+    if (!shouldUseSupabaseAudits()) {
+      auditDetailRepository.saveAuditDetail(detail)
+    }
     return detail
   }
 
@@ -121,13 +134,7 @@ export async function createAudit(input: CreateAuditInput): Promise<Audit> {
 
   await createHistoryEvent(auditSession.id, "pending", "Audit session created")
 
-  const listEntry = buildAuditListEntryFromSession({
-    session: auditSession,
-    pages: [],
-    findings: [],
-    scores: [],
-    history: await getAuditSessionData(auditSession.id).then((data) => data?.history ?? []),
-  })
+  const listEntry = buildAuditListEntryFromSummary(auditSession, 0, [])
 
   if (!shouldUseSupabaseAudits()) {
     auditListRepository.createAuditEntry(listEntry)
@@ -150,9 +157,13 @@ export async function getAuditSessionDataById(id: string): Promise<AuditSessionD
 
 export async function waitForAuditCompletion(
   id: string,
-  options?: { intervalMs?: number; timeoutMs?: number }
+  options?: {
+    intervalMs?: number
+    timeoutMs?: number
+    onStatus?: (status: AuditSessionStatus) => void
+  }
 ): Promise<AuditSessionStatus> {
-  const intervalMs = options?.intervalMs ?? 500
+  const intervalMs = options?.intervalMs ?? 750
   const timeoutMs = options?.timeoutMs ?? 120_000
   const startedAt = Date.now()
 
@@ -165,7 +176,12 @@ export async function waitForAuditCompletion(
         return
       }
 
-      if (!shouldUseSupabaseAudits()) {
+      options?.onStatus?.(session.status)
+
+      if (
+        !shouldUseSupabaseAudits() &&
+        (session.status === "completed" || session.status === "failed")
+      ) {
         await auditListRepository.syncAuditFromSession(id)
       }
 
@@ -208,6 +224,7 @@ export async function deleteAudit(id: string): Promise<void> {
   }
 
   await deleteAuditRecord(id)
+  invalidateCompletedAuditDetail(id)
   auditListRepository.removeAuditEntry(id)
   auditDetailRepository.removeAuditDetail(id)
 }
@@ -225,6 +242,12 @@ export async function isValidAuditUrl(url: string): Promise<boolean> {
 
 export async function validateAuditUrlInput(url: string) {
   return validateAuditUrl(url)
+}
+
+export async function getDashboardData() {
+  await delay()
+  const userId = await resolveUserId()
+  return buildDashboardBundle(userId)
 }
 
 export async function getDashboardMetrics(): Promise<DashboardMetric[]> {

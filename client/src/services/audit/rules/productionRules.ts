@@ -33,7 +33,7 @@ import {
   homepageUrl,
   requireHomepage,
 } from "@/services/audit/rules/ruleHelpers"
-import type { AuditRule, AuditRuleContext } from "@/types/auditEngine"
+import type { AuditRule } from "@/types/auditEngine"
 import type { ScoredFindingInput } from "@/services/audit/scoring/calculateAuditScore"
 
 function finding(

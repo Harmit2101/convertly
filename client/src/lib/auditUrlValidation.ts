@@ -3,7 +3,16 @@ import type { AuditUrlValidationResult } from "@/types/auditEngine"
 const BLOCKED_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"])
 
 function stripControlCharacters(value: string): string {
-  return value.replace(/[\u0000-\u001F\u007F]/g, "").trim()
+  let result = ""
+
+  for (const char of value) {
+    const code = char.charCodeAt(0)
+    if (code >= 32 && code !== 127) {
+      result += char
+    }
+  }
+
+  return result.trim()
 }
 
 export function sanitizeAuditUrl(value: string): string {

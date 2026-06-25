@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { useAuthPanel } from "@/components/auth/AuthPanelContext"
+import { useAuthPanel } from "@/hooks/useAuthPanel"
 import type { AuthLegalView } from "@/features/auth/content/authContent"
 import { cn } from "@/lib/utils"
 

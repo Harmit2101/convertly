@@ -11,6 +11,7 @@ type AuditSummarySectionProps = {
 }
 
 function AuditSummarySection({ audit }: AuditSummarySectionProps) {
+  const showScoreComparison = audit.previousScore !== 0 || audit.scoreDelta !== 0
   const deltaPositive = audit.scoreDelta > 0
   const deltaNegative = audit.scoreDelta < 0
   const DeltaIcon = deltaPositive
@@ -34,39 +35,42 @@ function AuditSummarySection({ audit }: AuditSummarySectionProps) {
     <AppPageSection
       eyebrow="Results"
       title="Audit summary"
-      description="Conversion health snapshot for this audit run."
+      description="Supporting metrics from this audit run."
     >
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card className="app-card-metric hover:translate-y-0">
-          <Text variant="muted" size="sm" className="max-w-none font-medium">
-            Growth Score
-          </Text>
-          <p className="mt-3 text-3xl font-medium tracking-tight tabular-nums text-foreground">
-            {audit.overallScore}
-          </p>
-        </Card>
-        <Card className="app-card-metric hover:translate-y-0">
-          <Text variant="muted" size="sm" className="max-w-none font-medium">
-            Previous score
-          </Text>
-          <p className="mt-3 text-3xl font-medium tracking-tight tabular-nums text-foreground/85">
-            {audit.previousScore}
-          </p>
-        </Card>
-        <Card className="app-card-metric hover:translate-y-0">
-          <Text variant="muted" size="sm" className="max-w-none font-medium">
-            Score delta
-          </Text>
-          <p
-            className={cn(
-              "mt-3 flex items-center gap-1 text-3xl font-medium tracking-tight tabular-nums",
-              deltaColor
-            )}
-          >
-            <DeltaIcon className="size-5 shrink-0" aria-hidden />
-            {deltaLabel}
-          </p>
-        </Card>
+      <div
+        className={cn(
+          "audit-report-summary-grid",
+          showScoreComparison
+            ? "audit-report-summary-grid--with-comparison"
+            : "audit-report-summary-grid--single"
+        )}
+      >
+        {showScoreComparison ? (
+          <>
+            <Card className="app-card-metric hover:translate-y-0">
+              <Text variant="muted" size="sm" className="max-w-none font-medium">
+                Previous score
+              </Text>
+              <p className="mt-3 text-3xl font-medium tracking-tight tabular-nums text-foreground/85">
+                {audit.previousScore}
+              </p>
+            </Card>
+            <Card className="app-card-metric hover:translate-y-0">
+              <Text variant="muted" size="sm" className="max-w-none font-medium">
+                Score delta
+              </Text>
+              <p
+                className={cn(
+                  "mt-3 flex items-center gap-1 text-3xl font-medium tracking-tight tabular-nums",
+                  deltaColor
+                )}
+              >
+                <DeltaIcon className="size-5 shrink-0" aria-hidden />
+                {deltaLabel}
+              </p>
+            </Card>
+          </>
+        ) : null}
         <Card className="app-card-metric hover:translate-y-0">
           <Text variant="muted" size="sm" className="max-w-none font-medium">
             Pages scanned

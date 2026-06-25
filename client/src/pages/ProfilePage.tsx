@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 
-import { useAuthSession } from "@/components/auth/AuthSessionProvider"
+import { useAuthSession } from "@/hooks/useAuthSession"
 import { AuthFormMessage } from "@/components/auth/AuthFormMessage"
 import { PageLoading } from "@/components/feedback/PageState"
 import { ChangePasswordDrawer } from "@/features/profile/components/ChangePasswordDrawer"
@@ -191,16 +191,20 @@ function ProfilePage() {
   useEffect(() => {
     if (!account) return
 
-    if (persistedEdit?.open && !editFirstName && !editLastName) {
-      setEditFirstName(account.firstName)
-      setEditLastName(account.lastName)
-      resetMobileEdit(account.firstName, account.lastName)
-      return
-    }
+    const timer = window.setTimeout(() => {
+      if (persistedEdit?.open && !editFirstName && !editLastName) {
+        setEditFirstName(account.firstName)
+        setEditLastName(account.lastName)
+        resetMobileEdit(account.firstName, account.lastName)
+        return
+      }
 
-    if (!persistedEdit?.open) {
-      resetMobileEdit(account.firstName, account.lastName)
-    }
+      if (!persistedEdit?.open) {
+        resetMobileEdit(account.firstName, account.lastName)
+      }
+    }, 0)
+
+    return () => window.clearTimeout(timer)
   }, [account, editFirstName, editLastName, persistedEdit?.open, resetMobileEdit])
 
   const openEdit = useCallback(() => {
@@ -340,8 +344,6 @@ function ProfilePage() {
           clearPasswordDrawerState()
           syncPasswordPersistence(false, false, "", "")
         }
-      } catch (error) {
-        throw error
       } finally {
         setIsChangingPassword(false)
       }
