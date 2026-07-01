@@ -5,6 +5,7 @@ import {
   siteHasReachablePageType,
   type SiteDetectorContext,
 } from "@/services/audit/intelligence/detectors/context"
+import { getSnapshotMetrics } from "@/services/audit/rules/snapshotMetrics"
 
 export type SiteDetector = (ctx: SiteDetectorContext) => DetectorResult
 
@@ -54,22 +55,22 @@ export const SITE_DETECTORS: Record<string, SiteDetector> = {
   },
 
   "site-inconsistent-navigation": (c) => {
-    const snapshots = c.pageSnapshots.filter((s) => s.fetchSucceeded && s.renderDiagnostics)
+    const snapshots = c.pageSnapshots.filter((s) => s.fetchSucceeded && s.document)
     if (snapshots.length < 3) return pass()
-    const linkCounts = snapshots.map((s) => s.renderDiagnostics?.linkCount ?? 0)
+    const linkCounts = snapshots.map((s) => getSnapshotMetrics(s).linkCount)
     const min = Math.min(...linkCounts)
     const max = Math.max(...linkCounts)
     if (max - min <= 12) return pass()
     return fail(72, [
-      { label: "Link count range", value: `${min}–${max} across rendered pages` },
+      { label: "Link count range", value: `${min}–${max} across analyzed pages` },
     ])
   },
 
   "site-weak-internal-linking": (c) => {
-    const analyzed = c.pageSnapshots.filter((s) => s.fetchSucceeded)
+    const analyzed = c.pageSnapshots.filter((s) => s.fetchSucceeded && s.document)
     if (analyzed.length < 4) return pass()
     const avgLinks =
-      analyzed.reduce((sum, s) => sum + (s.renderDiagnostics?.linkCount ?? 0), 0) / analyzed.length
+      analyzed.reduce((sum, s) => sum + getSnapshotMetrics(s).linkCount, 0) / analyzed.length
     if (avgLinks >= 6) return pass()
     return fail(70, [{ label: "Average links per page", value: avgLinks.toFixed(1) }])
   },

@@ -15,7 +15,23 @@ export type TimelineDisplayItem =
 
 const ANALYZED_PATTERN = /^Analyzed (\S+) — (\d+) finding/
 
+/** Internal audit_history messages persisted for rebuild — never show in timeline UI */
+const INTERNAL_HISTORY_MESSAGE_PATTERNS = [
+  /^__/,
+  /^Score explainability:/,
+] as const
+
+export function isInternalHistoryMessage(message: string): boolean {
+  const trimmed = message.trim()
+  return INTERNAL_HISTORY_MESSAGE_PATTERNS.some((pattern) => pattern.test(trimmed))
+}
+
+export function filterPublicTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
+  return events.filter((event) => !isInternalHistoryMessage(event.label))
+}
+
 export function buildTimelineDisplayItems(events: TimelineEvent[]): TimelineDisplayItem[] {
+  const publicEvents = filterPublicTimelineEvents(events)
   const items: TimelineDisplayItem[] = []
   let analysisBuffer: TimelineEvent[] = []
 
@@ -38,7 +54,7 @@ export function buildTimelineDisplayItems(events: TimelineEvent[]): TimelineDisp
     analysisBuffer = []
   }
 
-  for (const event of events) {
+  for (const event of publicEvents) {
     if (ANALYZED_PATTERN.test(event.label)) {
       analysisBuffer.push(event)
       continue

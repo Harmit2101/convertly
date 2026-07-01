@@ -7,8 +7,34 @@ import {
   countApplicableRuleEvaluations,
   countExecutedRuleEvaluations,
 } from "@/services/audit/intelligence/execution/ruleExecutor"
+import { RuleExecutionTracker } from "@/services/audit/intelligence/execution/ruleExecutionTracker"
 import { calculateAuditScoreV3 } from "@/services/audit/intelligence/scoring/scoringEngineV3"
 import type { ScoringEngineV3Result } from "@/services/audit/intelligence/scoring/scoringEngineV3"
+import { buildScoreExplanation } from "@/services/audit/intelligence/scoring/scoreExplanation"
+import { consolidateConsultantRecommendations } from "@/services/audit/intelligence/recommendations/consultantRecommendation"
+import { groupIntelligenceFindings } from "@/services/audit/intelligence/findings/groupedFindings"
+import { buildAuditStrengths } from "@/services/audit/intelligence/reporting/auditStrengths"
+import { buildReportScoreExplanation } from "@/services/audit/intelligence/reporting/reportScoreExplanation"
+import {
+  assessSiteRenderConfidence,
+} from "@/services/audit/intelligence/rendering/renderConfidence"
+import {
+  applyRenderReliabilityToFindings,
+  buildRenderReliabilityContext,
+  buildReliabilityReport,
+  computeRenderSensitiveVerificationStats,
+} from "@/services/audit/intelligence/rendering/renderReliability"
+import {
+  buildAllPageScoreBreakdowns,
+} from "@/services/audit/intelligence/scoring/pageScoreDiagnostics"
+import {
+  buildPageDiagnosticReport,
+  logAuditDiagnostics,
+} from "@/services/audit/intelligence/diagnostics/auditDiagnostics"
+import { SCORING_ENGINE_VERSION } from "@/services/audit/intelligence/scoring/scoringPolicy"
+import { detectWebsiteIntent } from "@/services/audit/intelligence/websiteIntentDetection"
+import { detectPageIntent } from "@/services/audit/intelligence/pageIntentDetection"
+import { getRuleIdsForIntent } from "@/services/audit/intelligence/pageIntentDetection"
 import type {
   IntelligenceExecutionResult,
   IntelligenceFindingDraft,
@@ -23,11 +49,14 @@ export type IntelligenceEngineOptions = {
   onPageAnalyzed?: (snapshot: PageContentSnapshot, findingCount: number) => void | Promise<void>
 }
 
-function getSnapshotsEligibleForRules(snapshots: PageContentSnapshot[]): PageContentSnapshot[] {
+function getSnapshotsEligibleForRules(
+  snapshots: PageContentSnapshot[],
+  spaMode = false
+): PageContentSnapshot[] {
   return snapshots.filter((snapshot) => {
     if (!snapshot.fetchSucceeded || !snapshot.document) return false
     if (!snapshot.analyzed) return false
-    return verifyPageAnalysisGate(snapshot).passed
+    return verifyPageAnalysisGate(snapshot, { spaMode }).passed
   })
 }
 
@@ -44,7 +73,29 @@ export async function runIntelligenceEngine(
   scoring: ScoringEngineV3Result
 }> {
   const pageFindings: IntelligenceFindingDraft[] = []
-  const eligibleSnapshots = getSnapshotsEligibleForRules(context.pageSnapshots)
+  const pageIntents: IntelligenceExecutionResult["pageIntents"] = {}
+  const tracker = new RuleExecutionTracker()
+  const spaMode = context.spaMode ?? false
+  const eligibleSnapshots = getSnapshotsEligibleForRules(context.pageSnapshots, spaMode)
+  const eligibleIds = new Set(eligibleSnapshots.map((snapshot) => snapshot.page.id))
+  const analyzedPageIds = new Set(eligibleSnapshots.map((snapshot) => snapshot.page.id))
+
+  const renderConfidence = assessSiteRenderConfidence(context.pageSnapshots, analyzedPageIds)
+
+  for (const snapshot of context.pageSnapshots) {
+    const detected = detectPageIntent({ page: snapshot.page, snapshot })
+    pageIntents[snapshot.page.id] = detected
+
+    if (!eligibleIds.has(snapshot.page.id)) {
+      const skippedRuleIds = getRuleIdsForIntent(detected.pageIntent)
+      tracker.recordGateSkippedPage({
+        pageId: snapshot.page.id,
+        pagePath: snapshot.page.path,
+        ruleIds: skippedRuleIds,
+        pageIntent: detected.pageIntent,
+      })
+    }
+  }
 
   for (const snapshot of eligibleSnapshots) {
     const pageContext: PageRuleContext = {
@@ -54,7 +105,11 @@ export async function runIntelligenceEngine(
       currentSnapshot: snapshot,
     }
 
-    const findings = await executePageRules(pageContext)
+    const { findings } = await executePageRules(pageContext, tracker, {
+      trustworthyForUxRules:
+        renderConfidence.pageConfidence[snapshot.page.id]?.trustworthyForUxRules ??
+        renderConfidence.trustworthyForUxRules,
+    })
     pageFindings.push(...findings)
     await options.onPageAnalyzed?.(snapshot, findings.length)
   }
@@ -65,21 +120,130 @@ export async function runIntelligenceEngine(
     pageSnapshots: context.pageSnapshots,
   }
 
-  const siteFindings = await executeSiteRules(siteContext)
-  const intelligenceFindings = dedupeFindings([...pageFindings, ...siteFindings])
+  const siteFindings = await executeSiteRules(siteContext, tracker)
+  const rawFindings = dedupeFindings([...pageFindings, ...siteFindings])
+
+  const websiteIntent = detectWebsiteIntent({
+    session: context.session,
+    pages: context.pages,
+    pageSnapshots: context.pageSnapshots,
+  })
+
+  const reliabilityContext = buildRenderReliabilityContext({
+    websiteUrl: context.session.websiteUrl,
+    websiteIntent: websiteIntent.websiteIntent,
+    siteRenderConfidence: renderConfidence,
+  })
+
+  const intelligenceFindings = applyRenderReliabilityToFindings(rawFindings, reliabilityContext)
   const scoredFindings = toScoredFindingInputs(intelligenceFindings)
 
-  const analyzedPageIds = new Set(eligibleSnapshots.map((snapshot) => snapshot.page.id))
   const analyzedPages = context.pages.filter((page) => analyzedPageIds.has(page.id))
+  const snapshotsByPageId = new Map(
+    context.pageSnapshots.map((snapshot) => [snapshot.page.id, snapshot])
+  )
+  const skippedPageCount = context.pageSnapshots.length - eligibleSnapshots.length
+  const blockedPageCount = context.pageSnapshots.filter((snapshot) => !snapshot.fetchSucceeded).length
+
+  const ruleExecution = tracker.buildSummary()
+  const verificationStats = computeRenderSensitiveVerificationStats(
+    intelligenceFindings,
+    ruleExecution
+  )
+
+  const intentSuppressedRuleIds = [
+    ...new Set(
+      ruleExecution.skippedRules
+        .filter(
+          (record) =>
+            record.reason === "excluded_page_type" ||
+            record.reason === "not_applicable_page_type" ||
+            record.reason === "pack_not_allowed_for_intent" ||
+            record.reason === "pack_ignored_for_intent" ||
+            record.reason === "site_rule_not_applicable"
+        )
+        .map((record) => record.ruleId)
+    ),
+  ]
+
+  const reliabilityReport = buildReliabilityReport({
+    findings: intelligenceFindings,
+    ruleExecution,
+    context: reliabilityContext,
+    intentSuppressedRuleIds,
+  })
 
   const scoring = calculateAuditScoreV3(intelligenceFindings, context.pages, {
     analyzedPageIds,
     pageSnapshots: context.pageSnapshots,
-    applicableRuleCount: countApplicableRuleEvaluations(context.pages),
-    executedRuleCount: countExecutedRuleEvaluations(analyzedPages),
+    applicableRuleCount: countApplicableRuleEvaluations(context.pages, snapshotsByPageId),
+    executedRuleCount: countExecutedRuleEvaluations(analyzedPages, snapshotsByPageId),
+    skippedPageCount,
+    websiteIntent,
+    ruleExecution,
+    renderConfidenceScore: renderConfidence.score,
+    blockedPageCount,
+    crawlFailureCount: blockedPageCount,
+    renderSensitiveUnverifiedRatio: verificationStats.unverifiedRatio,
+    highRiskPlatform: reliabilityContext.highRiskPlatform,
   })
 
   const { categories, growthScore, pageScores } = scoring
+  const scoreExplanation = buildScoreExplanation({
+    scoring,
+    growthPotential: scoring.growthPotential,
+    findings: intelligenceFindings,
+    pages: context.pages,
+    ruleExecution,
+  })
+
+  const pagePathById = new Map(context.pages.map((page) => [page.id, page.path]))
+  const consultantRecommendations = consolidateConsultantRecommendations(
+    intelligenceFindings,
+    pagePathById,
+    websiteIntent.websiteIntent
+  )
+  const groupedFindings = groupIntelligenceFindings(intelligenceFindings, pagePathById)
+  const strengths = scoring.positiveScoring
+    ? buildAuditStrengths(scoring.positiveScoring)
+    : []
+  const reportScoreExplanation = buildReportScoreExplanation({
+    scoring,
+    scoreExplanation,
+    positiveScoring: scoring.positiveScoring,
+  })
+
+  const pageDiagnostics = buildAllPageScoreBreakdowns(
+    context.pages,
+    intelligenceFindings,
+    analyzedPageIds
+  ).map((breakdown) =>
+    buildPageDiagnosticReport({
+      pageId: breakdown.pageId,
+      path: breakdown.path,
+      pageIntent: pageIntents[breakdown.pageId]?.pageIntent ?? "generic",
+      scoreBreakdown: breakdown,
+    })
+  )
+
+  logAuditDiagnostics({
+    engineVersion: SCORING_ENGINE_VERSION,
+    generatedAt: new Date().toISOString(),
+    websiteIntent,
+    pageIntents: context.pages.map((page) => ({
+      pageId: page.id,
+      path: page.path,
+      intent: pageIntents[page.id] ?? detectPageIntent({
+        page,
+        snapshot: snapshotsByPageId.get(page.id),
+      }),
+    })),
+    ruleExecution,
+    scoreExplanation,
+    auditConfidence: scoring.auditConfidence,
+    consultantRecommendations,
+    pageDiagnostics,
+  })
 
   const execution: IntelligenceExecutionResult = {
     findings: intelligenceFindings,
@@ -87,6 +251,16 @@ export async function runIntelligenceEngine(
     siteFindingsCount: siteFindings.length,
     pageFindingsCount: pageFindings.length,
     analyzedPageIds: eligibleSnapshots.map((snapshot) => snapshot.page.id),
+    pageIntents,
+    ruleExecution,
+    scoreExplanation,
+    reportScoreExplanation,
+    consultantRecommendations,
+    strengths,
+    groupedFindings,
+    websiteIntent,
+    renderConfidence,
+    reliabilityReport,
   }
 
   return {

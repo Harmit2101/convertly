@@ -57,6 +57,11 @@ export type IntelligenceFindingDraft = {
   scope: RuleScope
   evidence: IntelligenceEvidence[]
   tags: string[]
+  verificationStatus?: import("@/services/audit/intelligence/rendering/renderReliability").FindingVerificationStatus
+  detectionOutcome?: import("@/services/audit/intelligence/rendering/renderReliability").DetectionOutcome
+  verificationReason?: string
+  excludeFromScoring?: boolean
+  suppressRecommendation?: boolean
 }
 
 export type IntelligenceExecutionResult = {
@@ -65,6 +70,16 @@ export type IntelligenceExecutionResult = {
   siteFindingsCount: number
   pageFindingsCount: number
   analyzedPageIds: string[]
+  pageIntents: Record<string, import("@/services/audit/intelligence/pageIntentTypes").DetectedPageIntent>
+  ruleExecution?: import("@/services/audit/intelligence/execution/ruleExecutionTracker").RuleExecutionSummary
+  scoreExplanation?: import("@/services/audit/intelligence/scoring/scoreExplanation").ScoreExplanation
+  reportScoreExplanation?: import("@/services/audit/intelligence/reporting/reportScoreExplanation").ReportScoreExplanation
+  consultantRecommendations?: import("@/services/audit/intelligence/recommendations/consultantRecommendation").ConsultantRecommendation[]
+  strengths?: import("@/services/audit/intelligence/reporting/auditStrengths").AuditStrength[]
+  groupedFindings?: import("@/services/audit/intelligence/findings/groupedFindings").GroupedIntelligenceFinding[]
+  websiteIntent?: import("@/services/audit/intelligence/websiteIntentTypes").DetectedWebsiteIntent
+  renderConfidence?: import("@/services/audit/intelligence/rendering/renderConfidence").SiteRenderConfidence
+  reliabilityReport?: import("@/services/audit/intelligence/rendering/renderReliability").ReliabilityReport
 }
 
 export type RecommendationDraft = {
@@ -74,6 +89,7 @@ export type RecommendationDraft = {
   problem: string
   evidence: string
   businessImpact: string
+  businessImpactLabel?: string
   priority: FindingSeverity
   difficulty: RuleDifficulty
   recommendation: string

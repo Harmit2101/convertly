@@ -1,91 +1,75 @@
 import type { PageContentSnapshot } from "@/services/audit/pageContentService"
 import type { AuditPage } from "@/types/auditEngine"
-import type { IntelligenceFindingDraft } from "@/services/audit/intelligence/types"
+import {
+  calculateAuditConfidenceFromSignals,
+  type AuditConfidenceResult as EngineConfidenceResult,
+} from "@/services/audit/intelligence/scoring/auditConfidenceEngine"
 
 export type AuditConfidenceInput = {
   pages: AuditPage[]
   analyzedPageIds: Set<string>
   pageSnapshots: PageContentSnapshot[]
-  findings: IntelligenceFindingDraft[]
   applicableRuleCount: number
   executedRuleCount: number
+  skippedPageCount?: number
+  renderConfidenceScore?: number
+  blockedPageCount?: number
+  crawlFailureCount?: number
+  renderSensitiveUnverifiedRatio?: number
+  highRiskPlatform?: boolean
 }
 
+/** Backward-compatible result shape — extended with explainability fields */
 export type AuditConfidenceResult = {
-  /** 0–100 composite confidence in audit completeness and finding quality */
   score: number
   label: string
+  tier: "High" | "Medium" | "Low"
+  manualVerificationRecommended: boolean
   components: {
     crawlCompleteness: number
-    renderSuccess: number
-    ruleCoverage: number
-    findingConfidence: number
+    analysisDepth: number
+    contentReliability: number
+    ruleIntegrity: number
   }
-}
-
-const COMPONENT_WEIGHTS = {
-  crawlCompleteness: 0.3,
-  renderSuccess: 0.25,
-  ruleCoverage: 0.25,
-  findingConfidence: 0.2,
-} as const
-
-function clampConfidence(value: number): number {
-  return Math.round(Math.min(98, Math.max(40, value)))
-}
-
-function confidenceLabel(score: number): string {
-  if (score >= 88) return "High confidence"
-  if (score >= 72) return "Moderate confidence"
-  if (score >= 55) return "Limited confidence"
-  return "Low confidence"
+  confidenceReasons?: string[]
+  confidenceWarnings?: string[]
+  signals?: EngineConfidenceResult["signals"]
 }
 
 /**
- * Estimates how complete and reliable an audit run is.
- *
- * Factors:
- * - Crawl completeness (analyzed vs discovered pages)
- * - Render / fetch success rate
- * - Rule coverage (executed vs applicable rules)
- * - Mean detector confidence across findings (or baseline when clean)
+ * Delegates to the signal-based confidence engine.
+ * @see auditConfidenceEngine.ts
  */
 export function calculateAuditConfidence(input: AuditConfidenceInput): AuditConfidenceResult {
-  const discovered = Math.max(1, input.pages.length)
-  const analyzed = input.analyzedPageIds.size
-  const crawlCompleteness = (analyzed / discovered) * 100
-
-  const snapshotsWithFetch = input.pageSnapshots.filter((snapshot) => snapshot.fetchSucceeded)
-  const renderSuccess =
-    snapshotsWithFetch.length === 0
-      ? 50
-      : (snapshotsWithFetch.filter((s) => s.document).length / snapshotsWithFetch.length) * 100
-
-  const ruleCoverage =
-    input.applicableRuleCount === 0
-      ? 85
-      : Math.min(100, (input.executedRuleCount / input.applicableRuleCount) * 100)
-
-  const findingConfidence =
-    input.findings.length === 0
-      ? 88
-      : input.findings.reduce((sum, finding) => sum + finding.confidence, 0) / input.findings.length
-
-  const score = clampConfidence(
-    crawlCompleteness * COMPONENT_WEIGHTS.crawlCompleteness +
-      renderSuccess * COMPONENT_WEIGHTS.renderSuccess +
-      ruleCoverage * COMPONENT_WEIGHTS.ruleCoverage +
-      findingConfidence * COMPONENT_WEIGHTS.findingConfidence
-  )
+  const engineResult = calculateAuditConfidenceFromSignals({
+    pages: input.pages,
+    pageSnapshots: input.pageSnapshots,
+    analyzedPageIds: input.analyzedPageIds,
+    applicableRuleCount: input.applicableRuleCount,
+    executedRuleCount: input.executedRuleCount,
+    skippedPageCount: input.skippedPageCount ?? 0,
+    renderConfidenceScore: input.renderConfidenceScore,
+    blockedPageCount: input.blockedPageCount ?? 0,
+    crawlFailureCount: input.crawlFailureCount ?? 0,
+    renderSensitiveUnverifiedRatio: input.renderSensitiveUnverifiedRatio,
+    highRiskPlatform: input.highRiskPlatform,
+  })
 
   return {
-    score,
-    label: confidenceLabel(score),
+    score: engineResult.confidenceScore,
+    label: engineResult.label,
+    tier: engineResult.tier,
+    manualVerificationRecommended: engineResult.manualVerificationRecommended,
     components: {
-      crawlCompleteness: Math.round(crawlCompleteness),
-      renderSuccess: Math.round(renderSuccess),
-      ruleCoverage: Math.round(ruleCoverage),
-      findingConfidence: Math.round(findingConfidence),
+      crawlCompleteness: engineResult.components.crawlCompleteness,
+      analysisDepth: engineResult.components.analysisDepth,
+      contentReliability: engineResult.components.domExtraction,
+      ruleIntegrity: engineResult.components.ruleCoverage,
     },
+    confidenceReasons: engineResult.confidenceReasons,
+    confidenceWarnings: engineResult.confidenceWarnings,
+    signals: engineResult.signals,
   }
 }
+
+export type { EngineConfidenceResult }

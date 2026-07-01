@@ -1,7 +1,13 @@
+import { isInternalHistoryMessage } from "@/features/audits/utils/timelinePresentation"
 import { isAuditInProgress } from "@/lib/auditStatus"
 import { calculatePageScoreFromAuditFindings } from "@/services/audit/intelligence/scoring/scoringEngineV2"
+import { parseIntelligenceSnapshotFromHistory, getPageScoreFromSnapshot } from "@/services/audit/intelligence/diagnostics/intelligenceSnapshot"
+import { INTELLIGENCE_CATEGORY_LABELS } from "@/services/audit/intelligence/categories"
+import type { ConsultantRecommendation } from "@/services/audit/intelligence/recommendations/consultantRecommendation"
 import { RULE_METADATA } from "@/services/audit/intelligence/rules/ruleMetadata"
 import { SCORING_ENGINE_VERSION } from "@/services/audit/intelligence/scoring/scoringPolicy"
+import { detectWebsiteIntent } from "@/services/audit/intelligence/websiteIntentDetection"
+import { isRuleApplicableToWebsiteIntent } from "@/services/audit/intelligence/websiteRuleApplicability"
 import { parseDomainFromUrl } from "@/lib/auditUrlValidation"
 import type {
   AuditDetail,
@@ -257,6 +263,9 @@ function resolveAuxiliaryScore(
 
 function buildRunMetadata(data: AuditSessionData): AuditRunMetadata {
   const analyzedPaths = getAnalyzedPathsFromHistory(data.history)
+  const intelligenceSnapshot = parseIntelligenceSnapshotFromHistory(
+    data.history.map((event) => event.message)
+  )
   const pagesAnalyzed =
     analyzedPaths.size > 0
       ? analyzedPaths.size
@@ -269,10 +278,11 @@ function buildRunMetadata(data: AuditSessionData): AuditRunMetadata {
   const scoreCeiling = resolveAuxiliaryScore(data.scores, "friction")
 
   return {
-    pagesDiscovered: data.pages.length,
+    pagesDiscovered: intelligenceSnapshot?.crawlDiagnostics?.pagesDiscovered ?? data.pages.length,
     pagesReachable: data.pages.filter((page) => page.discoveryStatus === "reachable").length,
     pagesUnreachable: data.pages.filter((page) => page.discoveryStatus === "unreachable").length,
-    pagesAnalyzed,
+    pagesAnalyzed:
+      intelligenceSnapshot?.crawlDiagnostics?.pagesAnalyzed ?? pagesAnalyzed,
     findingsCount: data.findings.length,
     siteFindingsCount: data.findings.filter((finding) => !finding.pageId).length,
     pageFindingsCount: data.findings.filter((finding) => finding.pageId).length,
@@ -288,6 +298,14 @@ function buildRunMetadata(data: AuditSessionData): AuditRunMetadata {
     scoreCeiling,
     blockerCount:
       scoreCeiling != null && scoreCeiling < 94 ? 1 : undefined,
+    websiteIntent: intelligenceSnapshot?.websiteIntent?.websiteIntent,
+    strengths: intelligenceSnapshot?.strengths,
+    reportScoreExplanation: intelligenceSnapshot?.reportScoreExplanation,
+    crawlDiagnostics: intelligenceSnapshot?.crawlDiagnostics,
+    renderConfidence: intelligenceSnapshot?.renderConfidence,
+    reliabilityReport: intelligenceSnapshot?.reliabilityReport,
+    auditConfidenceTier: intelligenceSnapshot?.auditConfidenceTier,
+    manualVerificationRecommended: intelligenceSnapshot?.manualVerificationRecommended,
   }
 }
 
@@ -306,6 +324,13 @@ function classifyTimelineMessage(message: string): TimelineEvent["kind"] {
   return "phase"
 }
 
+function normalizeAnalyzedPath(path: string): string {
+  const trimmed = path.trim()
+  if (!trimmed || trimmed === "/") return "/"
+  const withoutTrailing = trimmed.replace(/\/+$/, "") || "/"
+  return withoutTrailing.startsWith("/") ? withoutTrailing : `/${withoutTrailing}`
+}
+
 function getAnalyzedPathsFromHistory(
   history: AuditSessionData["history"]
 ): Set<string> {
@@ -314,7 +339,7 @@ function getAnalyzedPathsFromHistory(
   for (const event of history) {
     const match = event.message.match(/^Analyzed (\S+) —/)
     if (match?.[1]) {
-      paths.add(match[1])
+      paths.add(normalizeAnalyzedPath(match[1]))
     }
   }
 
@@ -324,14 +349,20 @@ function getAnalyzedPathsFromHistory(
 function mapPagesToFindings(data: AuditSessionData): PageFinding[] {
   const analyzedPaths = getAnalyzedPathsFromHistory(data.history)
   const legacyAudit = analyzedPaths.size === 0 && data.session.status === "completed"
+  const intelligenceSnapshot = parseIntelligenceSnapshotFromHistory(
+    data.history.map((event) => event.message)
+  )
 
   return data.pages.map((page) => {
     const issuesCount = data.findings.filter((finding) => finding.pageId === page.id).length
-    const normalizedPath = page.path.replace(/\/$/, "") || "/"
+    const normalizedPath = normalizeAnalyzedPath(page.path)
     const analyzed =
       legacyAudit ||
       analyzedPaths.has(page.path) ||
       analyzedPaths.has(normalizedPath)
+
+    const fallbackScore = calculatePageScoreFromAuditFindings(page, data.findings)
+    const score = getPageScoreFromSnapshot(intelligenceSnapshot, page.id, fallbackScore)
 
     return {
       id: page.id,
@@ -340,7 +371,7 @@ function mapPagesToFindings(data: AuditSessionData): PageFinding[] {
       url: page.url,
       pageType: PAGE_TYPE_LABELS[page.pageType],
       discoveryStatus: DISCOVERY_STATUS_LABELS[page.discoveryStatus],
-      score: calculatePageScoreFromAuditFindings(page, data.findings, { analyzed }),
+      score,
       issuesCount,
       status: analyzed ? pageStatus(issuesCount) : "At risk",
       severityBreakdown: buildSeverityBreakdown(
@@ -353,23 +384,115 @@ function mapPagesToFindings(data: AuditSessionData): PageFinding[] {
   })
 }
 
+function consultantToUiRecommendation(
+  rec: ConsultantRecommendation,
+  index: number
+): Recommendation {
+  return {
+    id: rec.id,
+    title: rec.title,
+    summary: `${rec.whyThisMatters} ${rec.recommendation}`,
+    priority: priorityFromSeverity(rec.severity, index),
+    estimatedLift: rec.businessImpactLabel || rec.businessImpact,
+    category:
+      INTELLIGENCE_CATEGORY_LABELS[rec.relatedCategory] ?? rec.relatedCategory,
+    affectedPages: rec.affectedPaths,
+    affectedCount: rec.affectedPaths.length || rec.evidenceCount,
+    evidenceCount: rec.evidenceCount,
+  }
+}
+
 function mapFindingsToRecommendations(data: AuditSessionData): Recommendation[] {
-  return [...data.findings]
-    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
-    .slice(0, 8)
-    .map((finding, index) => ({
-      id: `rec-${finding.id}`,
+  const intelligenceSnapshot = parseIntelligenceSnapshotFromHistory(
+    data.history.map((event) => event.message)
+  )
+  const consultantFromSnapshot = intelligenceSnapshot?.consultantRecommendations ?? []
+  const consultantFromDiagnostics =
+    intelligenceSnapshot?.diagnostics?.consultantRecommendations ?? []
+
+  const consultantRecs =
+    consultantFromSnapshot.length > 0 ? consultantFromSnapshot : consultantFromDiagnostics
+
+  if (consultantRecs.length > 0) {
+    return consultantRecs.slice(0, 8).map(consultantToUiRecommendation)
+  }
+
+  const websiteIntent =
+    intelligenceSnapshot?.websiteIntent?.websiteIntent ??
+    detectWebsiteIntent({
+      session: data.session,
+      pages: data.pages,
+      pageSnapshots: [],
+    }).websiteIntent
+
+  const ruleTitleByNormalizedTitle = new Map(
+    RULE_METADATA.map((rule) => [rule.title.trim().toLowerCase(), rule.id])
+  )
+
+  type RecommendationGroup = {
+    title: string
+    summary: string
+    severity: FindingSeverity
+    category: string
+    affectedPages: string[]
+    findingIds: string[]
+    evidenceCount: number
+  }
+
+  const groups = new Map<string, RecommendationGroup>()
+
+  for (const finding of data.findings) {
+    const ruleId = ruleTitleByNormalizedTitle.get(finding.title.trim().toLowerCase())
+    if (ruleId && !isRuleApplicableToWebsiteIntent(ruleId, websiteIntent)) {
+      continue
+    }
+
+    const key = finding.title.trim().toLowerCase()
+    const pagePath = finding.pageId
+      ? data.pages.find((page) => page.id === finding.pageId)?.path
+      : undefined
+    const existing = groups.get(key)
+
+    if (existing) {
+      existing.findingIds.push(finding.id)
+      existing.evidenceCount += 1
+      if (pagePath && !existing.affectedPages.includes(pagePath)) {
+        existing.affectedPages.push(pagePath)
+      }
+      if (severityRank(finding.severity) < severityRank(existing.severity)) {
+        existing.severity = finding.severity
+      }
+      continue
+    }
+
+    groups.set(key, {
       title: finding.title,
       summary: finding.recommendation,
-      priority: priorityFromSeverity(finding.severity, index),
-      estimatedLift: liftLabelForSeverity(finding.severity),
+      severity: finding.severity,
       category: CATEGORY_LABELS[finding.category],
-      affectedPages: finding.pageId
-        ? [data.pages.find((page) => page.id === finding.pageId)?.path].filter(
-            (path): path is string => Boolean(path)
-          )
-        : [],
-      affectedCount: 1,
+      affectedPages: pagePath ? [pagePath] : [],
+      findingIds: [finding.id],
+      evidenceCount: 1,
+    })
+  }
+
+  return [...groups.values()]
+    .sort((a, b) => {
+      const severityDelta = severityRank(a.severity) - severityRank(b.severity)
+      if (severityDelta !== 0) return severityDelta
+      return b.evidenceCount - a.evidenceCount
+    })
+    .slice(0, 8)
+    .map((group, index) => ({
+      id: `rec-${group.findingIds[0]}`,
+      title: group.title,
+      summary: group.summary,
+      priority: priorityFromSeverity(group.severity, index),
+      estimatedLift: liftLabelForSeverity(group.severity),
+      category: group.category,
+      affectedPages: group.affectedPages,
+      affectedCount: group.affectedPages.length || group.evidenceCount,
+      evidenceCount: group.evidenceCount,
     }))
 }
 
@@ -380,7 +503,11 @@ function liftLabelForSeverity(severity: FindingSeverity): string {
 }
 
 function mapHistoryToTimeline(data: AuditSessionData): TimelineEvent[] {
-  return data.history.map((event, index, events) => ({
+  const publicHistory = data.history.filter(
+    (event) => !isInternalHistoryMessage(event.message)
+  )
+
+  return publicHistory.map((event, index, events) => ({
     id: event.id,
     label: event.message,
     timestamp: `${formatDisplayDate(event.createdAt)} · ${formatDisplayTime(event.createdAt)}`,
@@ -469,7 +596,10 @@ export function buildAuditDetailFromSession(data: AuditSessionData): AuditDetail
     recommendations: inProgress ? [] : mapFindingsToRecommendations(data),
     scoreBreakdown: inProgress ? [] : buildScoreBreakdown(data),
     pageFindings: inProgress ? [] : mapPagesToFindings(data),
-    timeline: data.history.length > 0 ? mapHistoryToTimeline(data) : [],
+    timeline:
+      data.history.some((event) => !isInternalHistoryMessage(event.message))
+        ? mapHistoryToTimeline(data)
+        : [],
     stats: inProgress
       ? {
           totalFindings: 0,

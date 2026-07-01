@@ -99,7 +99,7 @@ function AuditTimelineSection({ events, compact = false }: AuditTimelineSectionP
       >
         Audit timeline
       </Text>
-      {events.length === 0 ? (
+      {displayItems.length === 0 ? (
         <div className="audit-timeline__empty">
           <Clock className="mx-auto size-4 text-muted" aria-hidden />
           <Text variant="muted" size="sm" className="mt-2 max-w-none text-xs leading-5">

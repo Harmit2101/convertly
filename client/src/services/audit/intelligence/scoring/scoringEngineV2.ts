@@ -43,18 +43,16 @@ export function calculateGrowthScoreV2(
 
 export function calculatePageScore(
   page: AuditPage,
-  findings: IntelligenceFindingDraft[],
-  options?: { analyzed?: boolean }
+  findings: IntelligenceFindingDraft[]
 ): number {
-  return calculatePageScoreV3(page, findings, options)
+  return calculatePageScoreV3(page, findings)
 }
 
 export function calculatePageScoreFromAuditFindings(
   page: AuditPage,
-  findings: Array<{ pageId?: string; severity: FindingSeverity }>,
-  options?: { analyzed?: boolean }
+  findings: Array<{ pageId?: string; severity: FindingSeverity }>
 ): number {
-  return calculatePageScoreFromAuditFindingsV3(page, findings, options)
+  return calculatePageScoreFromAuditFindingsV3(page, findings)
 }
 
 export function calculateAllPageScores(

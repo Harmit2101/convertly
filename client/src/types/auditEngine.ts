@@ -133,6 +133,8 @@ export type AuditRuleContext = {
   session: AuditSession
   pages: AuditPage[]
   pageSnapshots: PageContentSnapshot[]
+  /** When true, page rules require rendered DOM; static HTML is used otherwise */
+  spaMode?: boolean
   /** Set by Intelligence Engine V2 during per-page execution */
   currentPageSnapshot?: PageContentSnapshot
 }

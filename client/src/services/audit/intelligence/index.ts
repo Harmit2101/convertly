@@ -28,6 +28,33 @@ export {
   SCORING_ENGINE_VERSION,
 } from "@/services/audit/intelligence/scoring/scoringEngineV2"
 export { buildRecommendations } from "@/services/audit/intelligence/recommendations/recommendationEngine"
+export {
+  buildConsultantRecommendation,
+  consolidateConsultantRecommendations,
+} from "@/services/audit/intelligence/recommendations/consultantRecommendation"
+export { buildScoreExplanation } from "@/services/audit/intelligence/scoring/scoreExplanation"
+export { buildReportScoreExplanation } from "@/services/audit/intelligence/reporting/reportScoreExplanation"
+export { buildAuditStrengths } from "@/services/audit/intelligence/reporting/auditStrengths"
+export { groupIntelligenceFindings } from "@/services/audit/intelligence/findings/groupedFindings"
+export { assessSiteRenderConfidence } from "@/services/audit/intelligence/rendering/renderConfidence"
+export { isRenderSensitiveRule, RENDER_SENSITIVE_RULE_IDS } from "@/services/audit/intelligence/rendering/renderSensitiveRules"
+export type { CrawlDiagnostics } from "@/services/audit/intelligence/diagnostics/crawlDiagnostics"
+export { calculateAuditConfidenceFromSignals } from "@/services/audit/intelligence/scoring/auditConfidenceEngine"
+export {
+  evaluateRuleApplicability,
+  resolveRuleApplicabilitySpec,
+  RULE_APPLICABILITY_OVERRIDES,
+} from "@/services/audit/intelligence/rules/ruleApplicability"
+export { RuleExecutionTracker } from "@/services/audit/intelligence/execution/ruleExecutionTracker"
+export {
+  isAuditDiagnosticsEnabled,
+  logAuditDiagnostics,
+} from "@/services/audit/intelligence/diagnostics/auditDiagnostics"
+export {
+  serializeIntelligenceSnapshot,
+  parseIntelligenceSnapshotFromHistory,
+} from "@/services/audit/intelligence/diagnostics/intelligenceSnapshot"
+export { PAGE_INTENT_PROFILES, getPageIntentProfile } from "@/services/audit/intelligence/pageIntentProfiles"
 export { getPageImportanceWeight, resolvePageImportanceTier } from "@/services/audit/intelligence/pageImportance"
 export { BUSINESS_PROFILES, DEFAULT_BUSINESS_PROFILE } from "@/services/audit/intelligence/businessProfiles"
 export { INTELLIGENCE_CATEGORIES } from "@/services/audit/intelligence/categories"
@@ -48,5 +75,23 @@ export type {
   BusinessProfileContext,
 } from "@/services/audit/intelligence/types"
 
-export type { RuleDefinition } from "@/services/audit/intelligence/rules/ruleDefinition"
-export type { RulePackId } from "@/services/audit/intelligence/rules/rulePacks"
+export {
+  detectPageIntent,
+  getRuleIdsForIntent,
+  intentToRulePageType,
+  isRuleApplicableToIntent,
+  PAGE_INTENT_PACKS,
+} from "@/services/audit/intelligence/pageIntent"
+export { detectWebsiteIntent } from "@/services/audit/intelligence/websiteIntentDetection"
+export type { WebsiteIntent, DetectedWebsiteIntent } from "@/services/audit/intelligence/websiteIntentTypes"
+export {
+  isRuleApplicableToWebsiteIntent,
+  resolveWebsiteRuleApplicabilitySpec,
+} from "@/services/audit/intelligence/websiteRuleApplicability"
+export {
+  buildPageScoreBreakdown,
+  buildAllPageScoreBreakdowns,
+  formatPageScoreBreakdownTable,
+  computePageLocalPenaltyUnits,
+} from "@/services/audit/intelligence/scoring/pageScoreDiagnostics"
+export type { PageScoreBreakdown, PageFindingPenaltyLine } from "@/services/audit/intelligence/scoring/pageScoreDiagnostics"

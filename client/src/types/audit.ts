@@ -46,6 +46,7 @@ export type Recommendation = {
   category: string
   affectedPages?: string[]
   affectedCount?: number
+  evidenceCount?: number
 }
 
 export type PageFindingStatus = "Healthy" | "At risk" | "Critical"
@@ -136,6 +137,14 @@ export type AuditRunMetadata = {
   /** V3 — maximum achievable Growth Score while blockers are active */
   scoreCeiling?: number
   blockerCount?: number
+  websiteIntent?: string
+  strengths?: Array<{ id: string; label: string }>
+  reportScoreExplanation?: import("@/services/audit/intelligence/reporting/reportScoreExplanation").ReportScoreExplanation
+  crawlDiagnostics?: import("@/services/audit/intelligence/diagnostics/crawlDiagnostics").CrawlDiagnostics
+  renderConfidence?: import("@/services/audit/intelligence/rendering/renderConfidence").SiteRenderConfidence
+  reliabilityReport?: import("@/services/audit/intelligence/rendering/renderReliability").ReliabilityReport
+  auditConfidenceTier?: "High" | "Medium" | "Low"
+  manualVerificationRecommended?: boolean
 }
 
 export type RecommendationPlaybook = {

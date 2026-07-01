@@ -145,6 +145,24 @@ export async function createAudit(input: CreateAuditInput): Promise<Audit> {
   return listEntry
 }
 
+/**
+ * Shared audit run workflow: create session, start engine, poll until complete/failed.
+ * Used by New Audit and Re-audit (via New Audit auto-start).
+ */
+export async function runAuditWorkflow(
+  sanitizedUrl: string,
+  options?: {
+    onStatus?: (status: AuditSessionStatus) => void
+  }
+): Promise<{ audit: Audit; finalStatus: AuditSessionStatus }> {
+  const audit = await createAudit({ url: sanitizedUrl })
+  const finalStatus = await waitForAuditCompletion(audit.id, {
+    onStatus: options?.onStatus,
+  })
+
+  return { audit, finalStatus }
+}
+
 export async function getAuditSession(id: string): Promise<AuditSession | null> {
   await delay(0)
   return getSessionById(id)
