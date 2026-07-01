@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 
 import { AuditRunningExperience } from "@/components/audit/AuditRunningExperience"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { AppPageShell } from "@/components/layout/AppPageShell"
 import { SectionHeader } from "@/components/layout/SectionHeader"
 import { Card } from "@/components/surfaces/Card"
 import { Text } from "@/components/ui/typography/Text"
+import type { NewAuditLocationState } from "@/lib/auditNavigation"
 import { auditDetailPath } from "@/lib/routes"
 import * as auditService from "@/services/auditService"
 import type { AuditSessionStatus } from "@/types/auditEngine"
@@ -40,6 +41,8 @@ const auditTypes = [
 
 function NewAuditPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const autoStartConsumed = useRef(false)
   const [url, setUrl] = useState("")
   const [selectedType, setSelectedType] = useState<string>(auditTypes[0].id)
   const [urlError, setUrlError] = useState<string | null>(null)
@@ -47,38 +50,55 @@ function NewAuditPage() {
   const [isRunning, setIsRunning] = useState(false)
   const [sessionStatus, setSessionStatus] = useState<AuditSessionStatus>("pending")
 
-  const handleStartAudit = async () => {
-    const validation = await auditService.validateAuditUrlInput(url)
-    if (!validation.valid) {
-      setUrlError(validation.errors[0] ?? "Enter a valid website URL")
-      setUrlWarning(null)
-      return
-    }
-
-    setUrlError(null)
-    setUrlWarning(validation.warnings[0] ?? null)
-    setIsRunning(true)
-    setSessionStatus("pending")
-
-    try {
-      const audit = await auditService.createAudit({ url: validation.sanitizedUrl })
-
-      const finalStatus = await auditService.waitForAuditCompletion(audit.id, {
-        onStatus: setSessionStatus,
-      })
-
-      if (finalStatus === "failed") {
-        setUrlError("Audit could not be completed. Check the URL and try again.")
+  const executeAudit = useCallback(
+    async (urlToRun: string) => {
+      const validation = await auditService.validateAuditUrlInput(urlToRun)
+      if (!validation.valid) {
+        setUrlError(validation.errors[0] ?? "Enter a valid website URL")
+        setUrlWarning(null)
         setIsRunning(false)
         return
       }
 
-      navigate(auditDetailPath(audit.id))
-    } catch {
-      setUrlError("Unable to start audit. Please try again.")
-      setIsRunning(false)
-    }
+      setUrlError(null)
+      setUrlWarning(validation.warnings[0] ?? null)
+      setIsRunning(true)
+      setSessionStatus("pending")
+
+      try {
+        const { audit, finalStatus } = await auditService.runAuditWorkflow(
+          validation.sanitizedUrl,
+          { onStatus: setSessionStatus }
+        )
+
+        if (finalStatus === "failed") {
+          setUrlError("Audit could not be completed. Check the URL and try again.")
+          setIsRunning(false)
+          return
+        }
+
+        navigate(auditDetailPath(audit.id))
+      } catch {
+        setUrlError("Unable to start audit. Please try again.")
+        setIsRunning(false)
+      }
+    },
+    [navigate]
+  )
+
+  const handleStartAudit = () => {
+    void executeAudit(url)
   }
+
+  useEffect(() => {
+    const state = (location.state as NewAuditLocationState | null) ?? {}
+    if (!state.autoStart || !state.url || autoStartConsumed.current) return
+
+    autoStartConsumed.current = true
+    setUrl(state.url)
+    navigate(location.pathname, { replace: true, state: null })
+    void executeAudit(state.url)
+  }, [location.pathname, location.state, navigate, executeAudit])
 
   const handleValidateUrl = async () => {
     const validation = await auditService.validateAuditUrlInput(url)
@@ -217,7 +237,7 @@ function NewAuditPage() {
             size="sm"
             className="w-full sm:w-auto"
             disabled={isRunning}
-            onClick={() => void handleStartAudit()}
+            onClick={handleStartAudit}
           >
             Start audit
           </Button>

@@ -2,9 +2,11 @@ import { getSupabaseClient } from "@/services/auth/supabaseClient"
 import { isAuditRenderConfigured, isSupabaseConfigured } from "@/lib/env"
 import { AUDIT_RENDER_FUNCTION } from "@/services/audit/fetch/constants"
 import { logPlaywright } from "@/services/audit/fetch/auditPipelineLogger"
+import { classifyFetchFailure } from "@/services/audit/fetch/fetchErrorClassifier"
 import type { RenderPageResult } from "@/services/audit/fetch/types"
 
-function failedRender(url: string, error: string): RenderPageResult {
+function failedRender(url: string, error: string, html?: string | null): RenderPageResult {
+  const userMessage = classifyFetchFailure({ error, html, finalUrl: url }).userMessage
   return {
     ok: false,
     finalUrl: url,
@@ -15,7 +17,7 @@ function failedRender(url: string, error: string): RenderPageResult {
     headings: { h1: [], h2: [] },
     contentHash: null,
     rendered: true,
-    error,
+    error: userMessage,
   }
 }
 

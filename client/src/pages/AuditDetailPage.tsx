@@ -11,6 +11,7 @@ import { AppPageHeader } from "@/components/layout/AppPageHeader"
 import { AppPageShell } from "@/components/layout/AppPageShell"
 import { Text } from "@/components/ui/typography/Text"
 import { AuditMetadataSection } from "@/features/audits/sections/AuditMetadataSection"
+import { AuditReportActions } from "@/features/audits/components/AuditReportActions"
 import { AuditRecommendationsSection } from "@/features/audits/sections/AuditRecommendationsSection"
 import { AuditSummarySection } from "@/features/audits/sections/AuditSummarySection"
 import { AuditTimelineSection } from "@/features/audits/sections/AuditTimelineSection"
@@ -185,9 +186,7 @@ function AuditDetailContent({ audit }: { audit: AuditDetail }) {
               <p className="audit-report-score-panel__label">Growth Score</p>
               <p className="audit-report-score-panel__hint">Weighted conversion health</p>
             </div>
-            <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
-              <Link to={ROUTES.auditNew}>Run again</Link>
-            </Button>
+            <AuditReportActions audit={audit} />
           </div>
         </header>
 

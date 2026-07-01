@@ -14,7 +14,10 @@ export function normalizeAuditPath(pathname: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`
 }
 
-export function verifyPageAnalysisGate(snapshot: PageContentSnapshot): PageAnalysisGateResult {
+export function verifyPageAnalysisGate(
+  snapshot: PageContentSnapshot,
+  options: { spaMode?: boolean } = {}
+): PageAnalysisGateResult {
   const requestedPath = normalizeAuditPath(snapshot.page.path)
   const finalUrl = snapshot.finalUrl ?? snapshot.page.url
 
@@ -61,6 +64,26 @@ export function verifyPageAnalysisGate(snapshot: PageContentSnapshot): PageAnaly
   }
 
   if (snapshot.contentSource !== "rendered") {
+    if (!options.spaMode) {
+      if (!snapshot.document) {
+        return {
+          passed: false,
+          pathnameMatch: true,
+          pathnameReason,
+          hydrationPassed: false,
+          hydrationReason: "static fetch succeeded but HTML could not be parsed",
+        }
+      }
+
+      return {
+        passed: true,
+        pathnameMatch: true,
+        pathnameReason,
+        hydrationPassed: true,
+        hydrationReason: "static HTML analysis (non-SPA site)",
+      }
+    }
+
     return {
       passed: false,
       pathnameMatch: true,

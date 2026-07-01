@@ -36,6 +36,7 @@ export async function runAuditRules(
   growthScore: number
   pageScores: Record<string, number>
   scoring: ScoringEngineV3Result
+  execution: import("@/services/audit/intelligence/types").IntelligenceExecutionResult
 }> {
   bootstrapIntelligenceEngine()
 
@@ -49,6 +50,7 @@ export async function runAuditRules(
     growthScore: result.growthScore,
     pageScores: result.pageScores,
     scoring: result.scoring,
+    execution: result.execution,
   }
 }
 

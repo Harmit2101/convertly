@@ -1,6 +1,7 @@
 import { inferPageTypeFromPath } from "@/services/audit/constants"
 import { MAX_RENDERED_PAGES } from "@/services/audit/fetch/constants"
 import { logDiscovery } from "@/services/audit/fetch/auditPipelineLogger"
+import { classifyFetchFailure } from "@/services/audit/fetch/fetchErrorClassifier"
 import { createAuditFetchContext, type AuditFetchContext } from "@/services/audit/fetch/types"
 import { hybridPageAcquire } from "@/services/audit/fetch/hybridPageAcquire"
 import {
@@ -12,9 +13,22 @@ import {
   type ExtractedLink,
 } from "@/services/audit/linkExtractor"
 import type { DiscoveredPageCandidate } from "@/types/auditEngine"
+import {
+  createEmptyCrawlDiagnostics,
+  crawlStopReasonFromFailureKind,
+  type CrawlDiagnostics,
+} from "@/services/audit/intelligence/diagnostics/crawlDiagnostics"
+
+export type PageDiscoveryResult = {
+  pages: DiscoveredPageCandidate[]
+  diagnostics: CrawlDiagnostics
+}
 
 export type PageDiscoveryProvider = {
-  discover: (baseUrl: string, context?: AuditFetchContext) => Promise<DiscoveredPageCandidate[]>
+  discover: (
+    baseUrl: string,
+    context?: AuditFetchContext
+  ) => Promise<PageDiscoveryResult>
 }
 
 function buildPageUrl(baseUrl: string, path: string): string {
@@ -91,7 +105,8 @@ function enqueueLinks(
 async function verifyCandidate(
   candidate: CrawlQueueItem,
   context: AuditFetchContext,
-  normalizedHomepagePath: string
+  normalizedHomepagePath: string,
+  diagnostics: CrawlDiagnostics
 ): Promise<{
   accepted: boolean
   candidate?: DiscoveredPageCandidate
@@ -110,11 +125,19 @@ async function verifyCandidate(
   const pageFetch = await hybridPageAcquire(candidate.url, context, { forceRender })
 
   if (!pageFetch.ok || pageFetch.status !== 200 || !pageFetch.html || !pageFetch.contentHash) {
+    diagnostics.pagesRejected += 1
+    if (pageFetch.status === 403 || pageFetch.status === 401 || pageFetch.status === 429) {
+      diagnostics.pagesBlocked += 1
+    }
     return {
       accepted: false,
       links: [],
       reason: "fetch-failed",
     }
+  }
+
+  if (pageFetch.finalUrl !== candidate.url) {
+    diagnostics.redirectCount += 1
   }
 
   if (
@@ -127,6 +150,8 @@ async function verifyCandidate(
       pageFetch.contentSource
     )
   ) {
+    diagnostics.pagesSkippedDuplicate += 1
+    diagnostics.duplicatesRemoved += 1
     return {
       accepted: false,
       links: [],
@@ -156,7 +181,8 @@ export const linkBasedPageDiscoveryProvider: PageDiscoveryProvider = {
   async discover(
     baseUrl: string,
     context: AuditFetchContext = createAuditFetchContext()
-  ): Promise<DiscoveredPageCandidate[]> {
+  ): Promise<PageDiscoveryResult> {
+    const diagnostics = createEmptyCrawlDiagnostics()
     const origin = normalizeBaseUrl(baseUrl)
 
     logDiscovery("Starting BFS page discovery", {
@@ -171,13 +197,30 @@ export const linkBasedPageDiscoveryProvider: PageDiscoveryProvider = {
     const homepageFetch = await hybridPageAcquire(homepageUrl, context, { isHomepage: true })
 
     if (!homepageFetch.ok || !homepageFetch.html || !homepageFetch.contentHash) {
+      const classified = classifyFetchFailure({
+        error: homepageFetch.error,
+        status: homepageFetch.status,
+        html: homepageFetch.html,
+        finalUrl: homepageFetch.finalUrl,
+      })
+
       logDiscovery("Homepage unreachable — discovery aborted", {
         url: homepageUrl,
         ok: homepageFetch.ok,
         status: homepageFetch.status,
         error: homepageFetch.error,
+        failureKind: classified.kind,
       })
-      return []
+
+      diagnostics.crawlStoppedReason = crawlStopReasonFromFailureKind(classified.kind)
+      diagnostics.crawlStoppedDetail = classified.userMessage
+      diagnostics.failureKind = classified.kind
+
+      throw new Error(classified.userMessage)
+    }
+
+    if (homepageFetch.finalUrl !== homepageUrl) {
+      diagnostics.redirectCount += 1
     }
 
     const homepagePath = normalizePath(new URL(homepageFetch.finalUrl).pathname)
@@ -190,6 +233,8 @@ export const linkBasedPageDiscoveryProvider: PageDiscoveryProvider = {
         title: extractPageTitle(homepageFetch.html, "Homepage"),
       },
     ]
+
+    diagnostics.pagesVerified = 1
 
     const visited = new Set<string>([homepagePath])
     const queued = new Set<string>()
@@ -213,8 +258,9 @@ export const linkBasedPageDiscoveryProvider: PageDiscoveryProvider = {
       if (visited.has(candidate.path)) continue
 
       visited.add(candidate.path)
+      diagnostics.pagesDiscovered += 1
 
-      const result = await verifyCandidate(candidate, context, homepagePath)
+      const result = await verifyCandidate(candidate, context, homepagePath, diagnostics)
 
       if (!result.accepted || !result.candidate) {
         logDiscovery("Candidate rejected", {
@@ -227,6 +273,7 @@ export const linkBasedPageDiscoveryProvider: PageDiscoveryProvider = {
       }
 
       verified.push(result.candidate)
+      diagnostics.pagesVerified += 1
 
       logDiscovery("URL verified", {
         path: result.candidate.path,
@@ -240,13 +287,23 @@ export const linkBasedPageDiscoveryProvider: PageDiscoveryProvider = {
       }
     }
 
+    if (queue.length > 0 && verified.length >= MAX_DISCOVERED_PAGES) {
+      diagnostics.crawlStoppedReason = "max_pages_reached"
+      diagnostics.crawlStoppedDetail = `Reached maximum of ${MAX_DISCOVERED_PAGES} verified pages.`
+    } else {
+      diagnostics.crawlStoppedReason = "completed"
+    }
+
+    diagnostics.pagesDiscovered += verified.length
+
     logDiscovery("Discovery complete", {
       baseUrl,
       verifiedPageCount: verified.length,
       paths: verified.map((page) => page.path).join(","),
+      diagnostics,
     })
 
-    return verified
+    return { pages: verified, diagnostics }
   },
 }
 
@@ -254,7 +311,7 @@ export async function discoverPages(
   baseUrl: string,
   provider: PageDiscoveryProvider = linkBasedPageDiscoveryProvider,
   context?: AuditFetchContext
-): Promise<DiscoveredPageCandidate[]> {
+): Promise<PageDiscoveryResult> {
   return provider.discover(baseUrl, context)
 }
 

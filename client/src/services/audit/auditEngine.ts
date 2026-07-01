@@ -10,6 +10,12 @@ import {
 } from "@/services/audit/scoring/calculateAuditScore"
 import type { ScoreCategory } from "@/services/audit/scoring/calculateAuditScore"
 import { delay } from "@/services/internal/delay"
+import { isAuditDiagnosticsEnabled } from "@/services/audit/intelligence/diagnostics/auditDiagnostics"
+import {
+  serializeIntelligenceSnapshot,
+  type IntelligenceSnapshot,
+} from "@/services/audit/intelligence/diagnostics/intelligenceSnapshot"
+import { SCORING_ENGINE_VERSION } from "@/services/audit/intelligence/scoring/scoringPolicy"
 import * as auditListRepository from "@/services/internal/auditListRepository"
 import {
   createFindings,
@@ -47,10 +53,13 @@ async function mapDiscoveredPages(
   auditId: string,
   baseUrl: string,
   fetchContext: ReturnType<typeof createAuditFetchContext>
-): Promise<AuditPage[]> {
-  const candidates = await discoverPages(baseUrl, undefined, fetchContext)
+): Promise<{
+  pages: AuditPage[]
+  crawlDiagnostics: import("@/services/audit/intelligence/diagnostics/crawlDiagnostics").CrawlDiagnostics
+}> {
+  const discovery = await discoverPages(baseUrl, undefined, fetchContext)
 
-  return candidates.map((candidate) => ({
+  const pages = discovery.pages.map((candidate) => ({
     id: crypto.randomUUID(),
     auditId,
     pageType: candidate.pageType,
@@ -78,6 +87,8 @@ async function mapDiscoveredPages(
       },
     },
   }))
+
+  return { pages, crawlDiagnostics: discovery.diagnostics }
 }
 
 async function recordPhase(
@@ -144,11 +155,15 @@ export async function runAuditEngine(auditId: string): Promise<void> {
     await delay(PHASE_DELAYS_MS.crawling)
 
     const fetchContext = createAuditFetchContext()
-    const discovered = await mapDiscoveredPages(auditId, session.websiteUrl, fetchContext)
+    const { pages: discovered, crawlDiagnostics } = await mapDiscoveredPages(
+      auditId,
+      session.websiteUrl,
+      fetchContext
+    )
 
     if (discovered.length === 0) {
       throw new Error(
-        "Unable to analyze the homepage. Verify the URL is public and reachable over HTTPS."
+        "Unable to reach the website. Verify the URL is public and accessible over HTTPS."
       )
     }
 
@@ -193,11 +208,13 @@ export async function runAuditEngine(auditId: string): Promise<void> {
 
     await createScores(createScorePlaceholders(auditId))
 
-    const { findings: scoredFindings, categories, growthScore, scoring } = await runAuditRules(
+    const { findings: scoredFindings, categories, growthScore, scoring, execution, pageScores } =
+      await runAuditRules(
       {
         session: analyzingSession,
         pages: pagesForAnalysis,
         pageSnapshots: analysisSnapshots,
+        spaMode: fetchContext.spaMode,
       },
       {
         onPageAnalyzed: async (snapshot, findingCount) => {
@@ -228,6 +245,60 @@ export async function runAuditEngine(auditId: string): Promise<void> {
         scoreCeiling: scoring.scoreCeiling,
       })
     )
+
+    const completedAt = new Date().toISOString()
+
+    const finalCrawlDiagnostics = {
+      ...crawlDiagnostics,
+      pagesAnalyzed: pagesForAnalysis.length,
+      pagesSkippedAnalysis: Math.max(0, savedPages.length - pagesForAnalysis.length),
+    }
+
+    const intelligenceSnapshot: IntelligenceSnapshot = {
+      version: 1,
+      pageScores,
+      pageIntents: Object.fromEntries(
+        Object.entries(execution.pageIntents).map(([pageId, detected]) => [
+          pageId,
+          detected.pageIntent,
+        ])
+      ),
+      auditConfidence: scoring.auditConfidence.score,
+      growthPotential: scoring.growthPotential.growthPotential,
+      scoreCeiling: scoring.scoreCeiling,
+      consultantRecommendations: execution.consultantRecommendations?.slice(0, 12),
+      websiteIntent: execution.websiteIntent,
+      strengths: execution.strengths,
+      groupedFindings: execution.groupedFindings,
+      reportScoreExplanation: execution.reportScoreExplanation,
+      crawlDiagnostics: finalCrawlDiagnostics,
+      renderConfidence: execution.renderConfidence,
+      reliabilityReport: execution.reliabilityReport,
+      auditConfidenceTier: scoring.auditConfidence.tier,
+      manualVerificationRecommended: scoring.auditConfidence.manualVerificationRecommended,
+      comparisonRecord: {
+        auditId,
+        websiteUrl: analyzingSession.websiteUrl,
+        domain: parseDomainFromUrl(analyzingSession.websiteUrl),
+        auditedAt: completedAt,
+        growthScore,
+        growthPotential: scoring.growthPotential.growthPotential,
+        scoreCeiling: scoring.scoreCeiling,
+        findingsCount: scoredFindings.length,
+        pagesAnalyzed: pagesForAnalysis.length,
+        auditEngineVersion: SCORING_ENGINE_VERSION,
+      },
+    }
+
+    await createHistoryEvent(auditId, "analyzing", serializeIntelligenceSnapshot(intelligenceSnapshot))
+
+    if (isAuditDiagnosticsEnabled() && execution.scoreExplanation) {
+      await createHistoryEvent(
+        auditId,
+        "analyzing",
+        `Score explainability: growth ${execution.scoreExplanation.growthScore}, recoverable ${execution.scoreExplanation.recoverablePoints}, rules passed ${execution.scoreExplanation.rulesPassed}, skipped ${execution.scoreExplanation.rulesSkipped}`
+      )
+    }
 
     const ceilingNote =
       scoring.appliedBlockers.length > 0

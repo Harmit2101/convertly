@@ -134,9 +134,10 @@ function AuditRecommendationsSection({
             {grouped.map((rec) => {
               const playbookId = rec.recommendationIds[0]!
               const pageCount = rec.affectedCount
+              const evidenceCount = rec.evidenceCount ?? pageCount
               const summary =
-                pageCount > 1
-                  ? `${pageCount} pages share this issue. ${rec.summary}`
+                evidenceCount > 1
+                  ? `${evidenceCount} findings across ${pageCount || evidenceCount} page${(pageCount || evidenceCount) === 1 ? "" : "s"}. ${rec.summary}`
                   : rec.summary
 
               return (

@@ -32,6 +32,7 @@ export type GroupedRecommendation = {
   affectedPages: string[]
   pageLabels: string[]
   affectedCount: number
+  evidenceCount: number
   recommendationIds: string[]
 }
 
@@ -112,6 +113,7 @@ export function groupRecommendations(
 
     if (existing) {
       existing.recommendationIds.push(rec.id)
+      existing.evidenceCount += rec.evidenceCount ?? 1
       for (const path of recPages) {
         if (!existing.affectedPages.includes(path)) {
           existing.affectedPages.push(path)
@@ -132,6 +134,7 @@ export function groupRecommendations(
       affectedPages: recPages,
       pageLabels: recPages.map((path) => resolvePageLabel(path, pages)),
       affectedCount: rec.affectedCount ?? (recPages.length || 1),
+      evidenceCount: rec.evidenceCount ?? 1,
       recommendationIds: [rec.id],
     })
   }

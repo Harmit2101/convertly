@@ -1,4 +1,5 @@
 import { hashContent } from "@/services/audit/fetch/contentHash"
+import { classifyFetchFailure } from "@/services/audit/fetch/fetchErrorClassifier"
 import { getSupabaseClient } from "@/services/auth/supabaseClient"
 import { isSupabaseConfigured } from "@/lib/env"
 
@@ -13,6 +14,15 @@ export type RemoteFetchResult = {
 
 const AUDIT_FETCH_FUNCTION = "audit-fetch"
 const FETCH_TIMEOUT_MS = 12_000
+
+function userFacingFetchError(result: Omit<RemoteFetchResult, "error"> & { error?: string }): string {
+  return classifyFetchFailure({
+    error: result.error,
+    status: result.status,
+    html: result.html,
+    finalUrl: result.finalUrl,
+  }).userMessage
+}
 
 async function fetchPageViaBrowser(url: string): Promise<RemoteFetchResult> {
   const controller = new AbortController()
@@ -32,7 +42,7 @@ async function fetchPageViaBrowser(url: string): Promise<RemoteFetchResult> {
       contentType.includes("text/html") || contentType.includes("application/xhtml")
 
     if (!response.ok || !isHtml) {
-      return {
+      const result = {
         ok: false,
         status: response.status,
         finalUrl: response.url || url,
@@ -40,6 +50,7 @@ async function fetchPageViaBrowser(url: string): Promise<RemoteFetchResult> {
         contentHash: null,
         error: "Unable to fetch HTML in local mode",
       }
+      return { ...result, error: userFacingFetchError(result) }
     }
 
     const html = await response.text()
@@ -53,7 +64,7 @@ async function fetchPageViaBrowser(url: string): Promise<RemoteFetchResult> {
       contentHash,
     }
   } catch (error) {
-    return {
+    const result = {
       ok: false,
       status: 0,
       finalUrl: url,
@@ -61,6 +72,7 @@ async function fetchPageViaBrowser(url: string): Promise<RemoteFetchResult> {
       contentHash: null,
       error: error instanceof Error ? error.message : "Fetch failed",
     }
+    return { ...result, error: userFacingFetchError(result) }
   } finally {
     window.clearTimeout(timeout)
   }
@@ -81,7 +93,7 @@ export async function fetchPageRemote(url: string): Promise<RemoteFetchResult> {
   )
 
   if (error) {
-    return {
+    const result = {
       ok: false,
       status: 0,
       finalUrl: url,
@@ -89,10 +101,11 @@ export async function fetchPageRemote(url: string): Promise<RemoteFetchResult> {
       contentHash: null,
       error: error.message,
     }
+    return { ...result, error: userFacingFetchError(result) }
   }
 
   if (!data) {
-    return {
+    const result = {
       ok: false,
       status: 0,
       finalUrl: url,
@@ -100,10 +113,11 @@ export async function fetchPageRemote(url: string): Promise<RemoteFetchResult> {
       contentHash: null,
       error: "Empty response from audit fetch",
     }
+    return { ...result, error: userFacingFetchError(result) }
   }
 
   if ("error" in data && typeof data.error === "string") {
-    return {
+    const result = {
       ok: false,
       status: 0,
       finalUrl: url,
@@ -111,6 +125,11 @@ export async function fetchPageRemote(url: string): Promise<RemoteFetchResult> {
       contentHash: null,
       error: data.error,
     }
+    return { ...result, error: userFacingFetchError(result) }
+  }
+
+  if (!data.ok) {
+    return { ...data, error: userFacingFetchError(data) }
   }
 
   return data

@@ -1,19 +1,14 @@
 import type { RuleDifficulty } from "@/services/audit/intelligence/types"
 import type { IntelligenceFindingDraft, RecommendationDraft } from "@/services/audit/intelligence/types"
 import { formatConfidenceLabel } from "@/services/audit/intelligence/confidence/confidenceEngine"
+import { consolidateConsultantRecommendations } from "@/services/audit/intelligence/recommendations/consultantRecommendation"
+import type { WebsiteIntent } from "@/services/audit/intelligence/websiteIntentTypes"
 
 const DIFFICULTY_BY_SEVERITY: Record<IntelligenceFindingDraft["severity"], RuleDifficulty> = {
   critical: "medium",
   high: "medium",
   medium: "low",
   low: "low",
-}
-
-const BENEFIT_BY_IMPACT: Record<IntelligenceFindingDraft["businessImpact"], string> = {
-  critical: "High conversion and revenue upside",
-  high: "Meaningful improvement to conversion path",
-  medium: "Moderate lift to clarity and trust",
-  low: "Incremental UX polish",
 }
 
 function buildImplementationSteps(finding: IntelligenceFindingDraft): string[] {
@@ -26,7 +21,8 @@ function buildImplementationSteps(finding: IntelligenceFindingDraft): string[] {
 
 export function buildRecommendationFromFinding(
   finding: IntelligenceFindingDraft,
-  index: number
+  index: number,
+  businessImpactLabel: string
 ): RecommendationDraft {
   const evidenceSummary =
     finding.evidence.length > 0
@@ -40,10 +36,11 @@ export function buildRecommendationFromFinding(
     problem: finding.title,
     evidence: evidenceSummary,
     businessImpact: finding.businessImpact,
+    businessImpactLabel,
     priority: finding.severity,
     difficulty: DIFFICULTY_BY_SEVERITY[finding.severity],
     recommendation: finding.recommendation,
-    expectedBenefit: `${BENEFIT_BY_IMPACT[finding.businessImpact]} (${formatConfidenceLabel(finding.confidence)} confidence)`,
+    expectedBenefit: `${businessImpactLabel} (${formatConfidenceLabel(finding.confidence)} confidence)`,
     implementationSteps: buildImplementationSteps(finding),
     confidence: finding.confidence,
     pageId: finding.pageId,
@@ -51,18 +48,28 @@ export function buildRecommendationFromFinding(
   }
 }
 
+/**
+ * Intent-aware recommendations — delegates to consultant consolidation.
+ */
 export function buildRecommendations(
-  findings: IntelligenceFindingDraft[]
+  findings: IntelligenceFindingDraft[],
+  pagePathById: Map<string, string> = new Map(),
+  websiteIntent: WebsiteIntent = "unknown"
 ): RecommendationDraft[] {
-  const severityRank = { critical: 0, high: 1, medium: 2, low: 3 }
+  const consultantRecs = consolidateConsultantRecommendations(
+    findings,
+    pagePathById,
+    websiteIntent
+  )
 
-  return [...findings]
-    .sort((a, b) => {
-      const severityDelta = severityRank[a.severity] - severityRank[b.severity]
-      if (severityDelta !== 0) return severityDelta
-      return b.confidence - a.confidence
-    })
-    .map((finding, index) => buildRecommendationFromFinding(finding, index))
+  return consultantRecs.map((rec, index) => {
+    const representativeFinding = findings.find((finding) => finding.ruleId === rec.ruleId)
+    if (!representativeFinding) {
+      throw new Error(`Missing representative finding for rule ${rec.ruleId}`)
+    }
+
+    return buildRecommendationFromFinding(representativeFinding, index, rec.businessImpactLabel)
+  })
 }
 
 export function toLegacyRecommendationText(draft: RecommendationDraft): string {

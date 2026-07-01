@@ -15,7 +15,7 @@ import type { BusinessProfileType } from "@/services/audit/intelligence/business
  * @see scoringEngineV3.ts
  */
 
-export const SCORING_ENGINE_VERSION = "Intelligence v3" as const
+export const SCORING_ENGINE_VERSION = "Intelligence v4" as const
 
 /** Severity penalty units — primary deduction driver within a category budget */
 export const SEVERITY_PENALTY_UNITS: Record<FindingSeverity, number> = {
@@ -80,6 +80,8 @@ export const GROWTH_SCORE_POLICY = {
   maxScore: 94,
   maxPageScore: 96,
   pageScoreBase: 100,
+  /** Penalty units that produce a full page score drop (baseline → 0) */
+  pageScoreBudget: 28,
   /** Diminishing multiplier for repeated findings in the same rule family */
   familyRepeatMultiplier: 0.7,
 } as const
